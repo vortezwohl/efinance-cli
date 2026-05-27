@@ -1,298 +1,287 @@
 # efinance-cli
 
 <div align="center">
-
-<p><strong>面向 <code>efinance</code> Python 套件的 Agent 友善型命令列工具</strong></p>
-
-<p>
-  將上游市場資料 API 暴露為可預期的命令樹，
-  將結果統一為 table / JSON / CSV / TSV，
-  並在結果形狀允許時疊加技術指標增強。
-</p>
-
-<table>
-  <tr>
-    <td><strong>Python</strong></td>
-    <td><code>&gt;= 3.13</code></td>
-    <td><strong>主要入口</strong></td>
-    <td><code>efinance</code>、<code>efi</code></td>
-  </tr>
-  <tr>
-    <td><strong>核心依賴</strong></td>
-    <td><code>click</code>、<code>efinance</code>、<code>pandas</code>、<code>vortezwohl</code></td>
-    <td><strong>文件</strong></td>
-    <td><code>README</code> + <code>i18n/</code></td>
-  </tr>
-</table>
-
+  <h1>efinance-cli</h1>
+  <p><strong>把 <code>efinance</code> 變成更適合人和 Agent 反覆調用的終端介面</strong></p>
+  <p>顯式命令樹、統一輸出層、可重用刷新機制、按需疊加技術指標。</p>
+  <p>
+    <a href="https://www.python.org/"><img alt="Python 3.13+" src="https://img.shields.io/badge/Python-3.13%2B-2F5D8C"></a>
+    <a href="https://pypi.org/project/click/"><img alt="Click" src="https://img.shields.io/badge/CLI-Click-0F766E"></a>
+    <a href="https://pypi.org/project/efinance/"><img alt="Upstream efinance" src="https://img.shields.io/badge/Upstream-efinance-B45309"></a>
+    <a href="https://pandas.pydata.org/"><img alt="Pandas" src="https://img.shields.io/badge/DataFrame-pandas-1D4ED8"></a>
+  </p>
+  <p>
+    <a href="#語言版本">語言版本</a> ·
+    <a href="#30-秒上手">30 秒上手</a> ·
+    <a href="#美股示例">美股示例</a> ·
+    <a href="#命令地圖">命令地圖</a> ·
+    <a href="#技術指標增強">技術指標增強</a> ·
+    <a href="#專案架構">專案架構</a>
+  </p>
 </div>
 
-這個專案不是一個簡單的腳本拼接層，而是 `efinance` 上的命令列產品層。它把命令探索、參數反射、執行、渲染與資料增強拆成獨立模組，以便維持對外能力穩定、可擴充、可維護。
+## 語言版本
 
-## 為什麼存在
-
-`efinance` 本身已經提供股票、基金、債券、期貨、通用查詢與工具類的豐富 Python API。問題不在「有沒有能力」，而在「能不能穩定地在終端裡操作」：
-
-- API 函式不容易快速瀏覽。
-- 不同回傳型別需要不同的展示規則。
-- 上游新增或修改函式時，手工接線很容易碎裂。
-- 輪詢刷新需要對所有查詢命令保持一致。
-- 部分結果可以做技術指標增強，但前提是資料形狀足夠相容。
-
-`efinance-cli` 的目標就是把這些問題收斂成一個更適合人與 Agent 反覆使用的終端介面。
-
-## 一覽
+<p align="center"><strong><a href="../README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | 繁體中文</strong></p>
 
 <table>
-  <thead>
-    <tr>
-      <th>層</th>
-      <th>職責</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><code>registry.py</code></td>
-      <td>控制暴露的上游模組與函式，並附加命令中繼資料。</td>
-    </tr>
-    <tr>
-      <td><code>introspection.py</code></td>
-      <td>根據 Python 簽名生成 Click 參數，並做輕量型別轉換。</td>
-    </tr>
-    <tr>
-      <td><code>executor.py</code></td>
-      <td>執行命令請求、處理 watch 迴圈，並輸出到終端或檔案。</td>
-    </tr>
-    <tr>
-      <td><code>rendering.py</code></td>
-      <td>統一處理 DataFrame / Series / dict / list / tuple / set / dataclass / namedtuple 輸出。</td>
-    </tr>
-    <tr>
-      <td><code>enrichment/</code></td>
-      <td>為相容的歷史、最新與即時結果加入技術指標。</td>
-    </tr>
-  </tbody>
+  <tr>
+    <td width="33%" valign="top">
+      <strong>可預測</strong><br />
+      命令名直接映射上游函式，適合快速檢索、腳本調用和 Agent 自動拼裝。
+    </td>
+    <td width="33%" valign="top">
+      <strong>可消費</strong><br />
+      所有結果統一落到 <code>table / json / csv / tsv</code>，不用為每類回傳值重新適配。
+    </td>
+    <td width="33%" valign="top">
+      <strong>可擴充</strong><br />
+      命令發現、參數反射、執行、渲染、指標增強相互解耦，便於局部演進。
+    </td>
+  </tr>
 </table>
 
-## 安裝
+## 這是什麼
+
+> `efinance-cli` 不是一組零散腳本，而是套在 `efinance` 之上的命令列產品層。
+
+它把上游市場資料 API 收束成一棵顯式命令樹，並把命令發現、參數解析、執行調度、結果渲染、技術指標增強拆成獨立模組。目標不是「重新發明一個行情庫」，而是把既有能力變成更穩定、更可重複調用的終端介面。
+
+## 30 秒上手
+
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <strong>1. 先搜標的</strong>
+      <pre lang="bash"><code>efinance search AAPL --market US_stock --result-count 5 --format json</code></pre>
+      當你只知道股票代碼或公司簡稱時，先走搜尋入口最穩。
+    </td>
+    <td width="33%" valign="top">
+      <strong>2. 再拿 quote_id</strong>
+      <pre lang="bash"><code>efinance utils get-quote-id AAPL</code></pre>
+      常見美股會拿到類似 <code>105.AAPL</code> 這樣的統一標識。
+    </td>
+    <td width="33%" valign="top">
+      <strong>3. 再做查詢</strong>
+      <pre lang="bash"><code>efinance stock get-quote-history AAPL --market-type us_stock --beg 20250102 --end 20250501 --limit 20</code></pre>
+      歷史 K 線、最新行情、導出檔案都可以沿著這條鏈路繼續走。
+    </td>
+  </tr>
+</table>
+
+## 為什麼不是直接用上游 API
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <strong>上游問題不在能力，而在操作一致性</strong>
+      <ul>
+        <li>函式面很大，終端裡不容易快速發現。</li>
+        <li>不同回傳型別需要不同展示策略。</li>
+        <li>即時刷新、導出、轉置、限行等橫切能力容易重複接線。</li>
+        <li>適合疊加指標的結果，通常需要額外的資料形狀判斷。</li>
+      </ul>
+    </td>
+    <td width="50%" valign="top">
+      <strong>CLI 解決的是「穩定調用體驗」</strong>
+      <ul>
+        <li>把 API 能力變成可瀏覽的命令樹。</li>
+        <li>把輸出規則收斂到統一渲染層。</li>
+        <li>把 watch 邏輯做成通用執行器能力。</li>
+        <li>把技術指標增強做成保守、可控的後處理步驟。</li>
+      </ul>
+    </td>
+  </tr>
+</table>
+
+## 美股示例
+
+<details open>
+<summary><strong>發現與定位</strong></summary>
 
 ```bash
-pip install efinance-cli
+efinance search AAPL --market US_stock --result-count 5
+efinance search NVDA --market US_stock --format json
+efinance utils get-quote-id AAPL
 ```
 
-專案目標 Python 版本為 3.13+，執行時需要可用的上游 `efinance` 套件。同時依賴 `pandas`，因為輸出正規化與指標增強都以 DataFrame 作為核心資料形態。
+</details>
 
-如果你是從原始碼開發，先準備好專案環境，再依據專案中繼資料安裝依賴。
-
-## 快速開始
-
-### 發現證券
+<details open>
+<summary><strong>歷史行情與導出</strong></summary>
 
 ```bash
-efinance search 贵州茅台
-efinance search PG --count 10 --format json
-efinance search 腾讯 --market Hongkong
+efinance stock get-quote-history AAPL --market-type us_stock --beg 20250102 --end 20250501 --limit 20
+efinance stock get-quote-history MSFT --market-type us_stock --beg 20250102 --end 20250501 --format csv --output msft-history.csv
+efinance stock get-quote-history TSLA --market-type us_stock --beg 20250102 --end 20250501 --indicator-level advanced --full
 ```
 
-當你還不知道準確代碼時，`search` 是最穩妥的入口。預設會優先使用本地搜尋快取，除非顯式指定 `--no-cache`。
+</details>
 
-### 查詢市場資料
+<details open>
+<summary><strong>最新行情與輪詢</strong></summary>
 
 ```bash
-efinance stock get-base-info 600519
-efinance stock get-quote-history 600519 --beg 20250101 --end 20250501 --full
-efinance fund get-base-info 161725
-efinance common get-latest-quote 600519
+efinance common get-latest-quote 105.AAPL --format json
+efinance watch --interval 5 common get-latest-quote 105.NVDA --format json
+efinance common get-latest-quote 105.MSFT --format json --output msft-latest.json
 ```
 
-### 原地刷新
+</details>
+
+<details>
+<summary><strong>輸出控制</strong></summary>
 
 ```bash
-efinance stock get-realtime-quotes --watch --interval 2
-efinance watch --interval 5 stock get-realtime-quotes
+efinance stock get-quote-history AAPL --market-type us_stock --beg 20250102 --end 20250501 --transpose
+efinance stock get-quote-history AAPL --market-type us_stock --beg 20250102 --end 20250501 --no-index
+efinance stock get-quote-history AAPL --market-type us_stock --beg 20250102 --end 20250501 --format tsv --output aapl.tsv
 ```
 
-頂層 `watch` 命令會把任意受支援的子命令包上一層刷新迴圈，並統一轉發刷新參數。適合對多個查詢命令重用同一套刷新策略。
+</details>
 
-## 命令面
+<blockquote>
+  注意：即時行情命令是否穩定返回，取決於上游市場資料源狀態。CLI 會保留失敗資訊，不會把網路波動靜默吞掉。
+</blockquote>
 
-CLI 暴露的是上游 `efinance` 的精選子集。
-命令名稱由 Python 函式名轉換而來：把底線替換成連字號。
-
-- `get_quote_history` → `get-quote-history`
-- `get_realtime_increase_rate` → `get-realtime-increase-rate`
-- `get_realtime_quotes_by_fs` → `get-realtime-quotes-by-fs`
-
-### 頂層命令
+## 命令地圖
 
 <table>
   <thead>
     <tr>
-      <th>命令</th>
-      <th>用途</th>
+      <th align="left">頂層命令</th>
+      <th align="left">定位</th>
+      <th align="left">典型入口</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td><code>search</code></td>
-      <td>依關鍵字與可選市場條件搜尋證券。</td>
+      <td>按關鍵字和市場列舉搜尋證券候選項。</td>
+      <td>不知道精確標識符時的第一站。</td>
     </tr>
     <tr>
       <td><code>watch</code></td>
-      <td>為任意受支援的子命令包上刷新迴圈。</td>
+      <td>給任意受支援子命令包一層刷新迴圈。</td>
+      <td>統一輪詢策略，而不是每條命令單獨記參數。</td>
     </tr>
     <tr>
       <td><code>stock</code></td>
-      <td>股票市場查詢。</td>
+      <td>股票相關查詢。</td>
+      <td>K 線、快照、最新行情、資金流、股東資訊。</td>
     </tr>
     <tr>
       <td><code>fund</code></td>
-      <td>基金市場查詢。</td>
+      <td>基金相關查詢。</td>
+      <td>淨值、估算漲跌、持倉分布、報告下載。</td>
     </tr>
     <tr>
       <td><code>bond</code></td>
-      <td>債券市場查詢。</td>
+      <td>債券相關查詢。</td>
+      <td>基礎資訊、行情、歷史成交與資金流。</td>
     </tr>
     <tr>
       <td><code>futures</code></td>
-      <td>期貨市場查詢。</td>
+      <td>期貨相關查詢。</td>
+      <td>基礎資訊、即時行情、K 線與成交明細。</td>
     </tr>
     <tr>
       <td><code>common</code></td>
-      <td>跨資產類型的共享查詢入口。</td>
+      <td>跨資產的共享查詢入口。</td>
+      <td>適合已知 <code>quote_id</code> 時直接訪問。</td>
     </tr>
     <tr>
       <td><code>utils</code></td>
-      <td>搜尋與識別碼工具。</td>
+      <td>搜尋與標識符工具。</td>
+      <td><code>search-quote</code>、<code>get-quote-id</code>、<code>add-market</code>。</td>
     </tr>
   </tbody>
 </table>
 
-### 模組命令群組
-
 <details open>
-<summary><strong>stock</strong></summary>
+<summary><strong>模組命令組</strong></summary>
 
-- `get-all-company-performance`
-- `get-all-report-dates`
-- `get-base-info`
-- `get-belong-board`
-- `get-daily-billboard`
-- `get-deal-detail`
-- `get-history-bill`
-- `get-latest-holder-number`
-- `get-latest-ipo-info`
-- `get-latest-quote`
-- `get-members`
-- `get-quote-history`
-- `get-quote-snapshot`
-- `get-realtime-quotes`
-- `get-today-bill`
-- `get-top10-stock-holder-info`
-
-</details>
-
-<details>
-<summary><strong>fund</strong></summary>
-
-- `get-base-info`
-- `get-fund-codes`
-- `get-fund-manager`
-- `get-industry-distribution`
-- `get-invest-position`
-- `get-pdf-reports`
-- `get-period-change`
-- `get-public-dates`
-- `get-quote-history`
-- `get-quote-history-multi`
-- `get-realtime-increase-rate`
-- `get-types-percentage`
-
-</details>
-
-<details>
-<summary><strong>bond</strong></summary>
-
-- `get-all-base-info`
-- `get-base-info`
-- `get-deal-detail`
-- `get-history-bill`
-- `get-quote-history`
-- `get-realtime-quotes`
-- `get-today-bill`
-
-</details>
-
-<details>
-<summary><strong>futures</strong></summary>
-
-- `get-deal-detail`
-- `get-futures-base-info`
-- `get-quote-history`
-- `get-realtime-quotes`
-
-</details>
-
-<details>
-<summary><strong>common</strong></summary>
-
-- `get-base-info`
-- `get-deal-detail`
-- `get-history-bill`
-- `get-latest-quote`
-- `get-quote-history`
-- `get-realtime-quotes-by-fs`
-- `get-today-bill`
-
-</details>
-
-<details>
-<summary><strong>utils</strong></summary>
-
-- `add-market`
-- `get-quote-id`
-- `search-quote`
-- `search-quote-locally`
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <strong>stock</strong><br />
+      <code>get-base-info</code><br />
+      <code>get-latest-quote</code><br />
+      <code>get-quote-history</code><br />
+      <code>get-quote-snapshot</code><br />
+      <code>get-realtime-quotes</code><br />
+      <code>get-deal-detail</code><br />
+      <code>get-history-bill</code><br />
+      <code>get-today-bill</code><br />
+      <code>get-top10-stock-holder-info</code><br />
+      <code>get-all-company-performance</code>
+    </td>
+    <td width="33%" valign="top">
+      <strong>fund</strong><br />
+      <code>get-base-info</code><br />
+      <code>get-fund-codes</code><br />
+      <code>get-fund-manager</code><br />
+      <code>get-industry-distribution</code><br />
+      <code>get-invest-position</code><br />
+      <code>get-pdf-reports</code><br />
+      <code>get-period-change</code><br />
+      <code>get-public-dates</code><br />
+      <code>get-quote-history</code><br />
+      <code>get-realtime-increase-rate</code>
+    </td>
+    <td width="33%" valign="top">
+      <strong>bond / futures / common / utils</strong><br />
+      <code>bond.get-base-info</code><br />
+      <code>bond.get-quote-history</code><br />
+      <code>futures.get-futures-base-info</code><br />
+      <code>futures.get-quote-history</code><br />
+      <code>common.get-latest-quote</code><br />
+      <code>common.get-quote-history</code><br />
+      <code>utils.search-quote</code><br />
+      <code>utils.search-quote-locally</code><br />
+      <code>utils.get-quote-id</code><br />
+      <code>utils.add-market</code>
+    </td>
+  </tr>
+</table>
 
 </details>
 
 ## 輸出模型
 
-所有命令都會經過統一輸出層，支援四種輸出模式：
-
 <table>
   <thead>
     <tr>
-      <th>格式</th>
-      <th>適用場景</th>
-      <th>行為</th>
+      <th align="left">格式</th>
+      <th align="left">適用場景</th>
+      <th align="left">說明</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td><code>table</code></td>
-      <td>終端閱讀</td>
-      <td>預設模式。對 DataFrame 類結果使用適合終端閱讀的表格展示。</td>
+      <td>終端直接閱讀</td>
+      <td>預設模式，適合 DataFrame 風格輸出。</td>
     </tr>
     <tr>
       <td><code>json</code></td>
-      <td>結構化下游處理</td>
-      <td>把 DataFrame、Series、dict、dataclass、namedtuple 序列化為 JSON。</td>
+      <td>Agent 下游處理</td>
+      <td>適合繼續做結構化消費、存檔和管道傳遞。</td>
     </tr>
     <tr>
       <td><code>csv</code></td>
-      <td>落盤與互通</td>
-      <td>輸出逗號分隔內容，並尊重索引與轉置設定。</td>
+      <td>落盤和資料交換</td>
+      <td>適合導入表格工具、腳本、分析流水線。</td>
     </tr>
     <tr>
       <td><code>tsv</code></td>
-      <td>表格工具友善匯出</td>
-      <td>與 CSV 相同，但使用定位字元分隔。</td>
+      <td>表格友好導出</td>
+      <td>行為與 CSV 相同，但使用製表符分隔。</td>
     </tr>
   </tbody>
 </table>
 
-通用輸出參數：
+統一執行時選項：
 
 - `--full`
 - `--transpose`
@@ -301,48 +290,42 @@ CLI 暴露的是上游 `efinance` 的精選子集。
 - `--output PATH`
 - `--encoding utf-8`
 
-這些參數會統一作用於整個命令樹，不需要為每個模組重新學一套輸出規則。
+這組參數會貫穿整個命令樹，不需要在不同模組之間重新學習一套輸出規則。
 
-## watch 模型
+## Watch 模型
 
-watch 支援由執行器統一實作，不需要為每個命令複製邏輯。
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <strong>內聯 watch</strong>
+      <pre lang="bash"><code>efinance common get-latest-quote 105.AAPL --watch --interval 5</code></pre>
+    </td>
+    <td width="50%" valign="top">
+      <strong>頂層 wrapper</strong>
+      <pre lang="bash"><code>efinance watch --interval 5 common get-latest-quote 105.AAPL --format json</code></pre>
+    </td>
+  </tr>
+</table>
 
-支援的命令可以直接原地刷新：
-
-```bash
-efinance stock get-realtime-quotes --watch --interval 2
-```
-
-或者由頂層 wrapper 包裝：
-
-```bash
-efinance watch --interval 2 stock get-realtime-quotes
-efinance watch --interval 10 fund get-realtime-increase-rate 161725 005827
-```
-
-通用 watch 參數：
+統一刷新參數：
 
 - `--watch`
 - `--interval FLOAT`
 - `--count INT`
 - `--clear / --no-clear`
 
-當你希望對多個子命令重用同一套刷新策略時，`watch` wrapper 最實用。
-
 ## 技術指標增強
 
-`enrichment/` 會在結果形狀足夠相容時，為歷史資料、最新快照與即時列表疊加技術指標。
-
-### 指標等級
+`enrichment/` 會在結果形狀足夠相容時，為歷史 K 線、最新行情、快照和部分即時列表疊加指標列。
 
 <table>
   <thead>
     <tr>
-      <th>等級</th>
-      <th>別名</th>
-      <th>歷史視窗</th>
-      <th>即時上限</th>
-      <th>典型用途</th>
+      <th align="left">等級</th>
+      <th align="left">別名</th>
+      <th align="left">歷史窗口</th>
+      <th align="left">即時上限</th>
+      <th align="left">適合場景</th>
     </tr>
   </thead>
   <tbody>
@@ -351,54 +334,50 @@ efinance watch --interval 10 fund get-realtime-increase-rate 161725 005827
       <td><code>1</code></td>
       <td>60</td>
       <td>50</td>
-      <td>核心均線與振盪類指標。</td>
+      <td>均線、RSI、KDJ、MACD 等基礎觀察。</td>
     </tr>
     <tr>
       <td><code>advanced</code></td>
       <td><code>2</code></td>
       <td>120</td>
       <td>80</td>
-      <td>趨勢強度與通道類擴展。</td>
+      <td>趨勢強度、通道類和更多動量指標。</td>
     </tr>
     <tr>
       <td><code>full</code></td>
       <td><code>3</code></td>
       <td>200</td>
       <td>120</td>
-      <td>更完整的指標覆蓋，包括一目均衡表、SAR、樞軸點、斐波那契、支撐/阻力等。</td>
+      <td>更大覆蓋面，包括 Ichimoku、SAR、樞軸點、斐波那契和支撐阻力。</td>
     </tr>
   </tbody>
 </table>
 
-### 增強適用範圍
+內建指標大致分為幾組：
 
-- 股票、債券、期貨、通用與基金歷史 K 線結果。
-- 股票快照、基礎資訊等單行結果。
-- 最新行情結果。
-- 即時列表結果，且會受配置限制。
+- 趨勢類：MACD、布林帶、DMI / ADX、SuperTrend、Ichimoku、Donchian、Keltner、Aroon、Parabolic SAR
+- 動量類：RSI、KDJ、ROC、CCI、PPO、TRIX、TSI、Williams %R
+- 成交量類：OBV、MFI、CMF、PVT、VWAP、Force Index、Volume Ratio
+- 波動率類：ATR、NATR、Historical Volatility、Chaikin Volatility、Mass Index
+- 價格結構類：Pivot Points、Fibonacci Retracement、Rolling Support / Resistance
 
-增強邏輯是保守的。只有當結果能可靠對應到 OHLCV 結構時，才會增加指標欄位。若上游結果無法穩定對齊，CLI 會保留原始結果，不會強行改寫。
+## 適合 Agent 的調用路徑
 
-### 會加入什麼
-
-專案內建一組較完整的指標，按關注點分組如下：
-
-- 趨勢類：MACD、布林帶、DMI / ADX、SuperTrend、一目均衡表、唐奇安通道、Keltner 通道、Aroon、拋物線 SAR
-- 動量類：RSI、KDJ、ROC、CCI、PPO、TRIX、TSI、威廉指標
-- 成交量類：OBV、MFI、CMF、PVT、VWAP、資金流向類指標、量比
-- 波動率類：ATR、NATR、歷史波動率、Chaikin 波動率、Mass Index
-- 價格結構類：樞軸點、斐波那契回撤、滾動支撐/阻力
-- 國內常見風格指標：BBI、BIAS、BRAR、CR、DMA、EMV、MTM、PSY、VR、ASI
-
-## 建議工作流
-
-當你還不知道準確識別碼時，先走發現路徑：
-
-```text
-search -> get-quote-id -> 模組查詢
+```mermaid
+flowchart LR
+  A["自然語言意圖"] --> B["search"]
+  B --> C["utils get-quote-id"]
+  C --> D["stock / common / futures"]
+  D --> E["rendering.py"]
+  E --> F["table / json / csv / tsv"]
+  D --> G["enrichment/"]
 ```
 
-這樣可以減少關鍵字歧義，是自然語言意圖轉成可執行查詢時最穩的路徑。
+推薦的穩定路徑是：
+
+```text
+search -> get-quote-id -> 模組查詢 -> 結構化輸出 / 檔案導出
+```
 
 ## 專案架構
 
@@ -407,24 +386,22 @@ search -> get-quote-id -> 模組查詢
 
 ```mermaid
 flowchart LR
-  API["上游 efinance API"] --> REG["registry.py"]
+  API["Upstream efinance API"] --> REG["registry.py"]
   REG --> INT["introspection.py"]
-  INT --> CMD["Click 命令樹"]
+  INT --> CMD["Click command tree"]
   CMD --> EXEC["executor.py"]
   EXEC --> ENR["enrichment/"]
   EXEC --> REN["rendering.py"]
-  REN --> OUT["stdout / 檔案輸出"]
+  REN --> OUT["stdout / file output"]
 ```
 
 </details>
 
-### 檔案職責
-
 <table>
   <thead>
     <tr>
-      <th>檔案 / 套件</th>
-      <th>職責</th>
+      <th align="left">檔案 / 包</th>
+      <th align="left">職責</th>
     </tr>
   </thead>
   <tbody>
@@ -434,31 +411,31 @@ flowchart LR
     </tr>
     <tr>
       <td><code>efinance_cli/app.py</code></td>
-      <td>應用組裝。</td>
+      <td>應用裝配。</td>
     </tr>
     <tr>
       <td><code>efinance_cli/commands.py</code></td>
-      <td>根命令、模組命令群組與頂層命令。</td>
+      <td>根命令、模組命令組、頂層命令。</td>
     </tr>
     <tr>
       <td><code>efinance_cli/registry.py</code></td>
-      <td>上游模組白名單、函式暴露與命令中繼資料。</td>
+      <td>可暴露上游能力的白名單與命令中繼資料。</td>
     </tr>
     <tr>
       <td><code>efinance_cli/introspection.py</code></td>
-      <td>以簽名生成 Click 參數。</td>
+      <td>基於簽名自動推導 Click 參數。</td>
     </tr>
     <tr>
       <td><code>efinance_cli/executor.py</code></td>
-      <td>請求執行、watch 迴圈與結果輸出。</td>
+      <td>執行請求、處理 watch 迴圈、發出結果。</td>
     </tr>
     <tr>
       <td><code>efinance_cli/rendering.py</code></td>
-      <td>輸出格式化與序列化。</td>
+      <td>統一做輸出格式化與序列化。</td>
     </tr>
     <tr>
       <td><code>efinance_cli/enrichment/</code></td>
-      <td>技術指標增強管線。</td>
+      <td>在相容結果上疊加技術指標。</td>
     </tr>
     <tr>
       <td><code>efinance_cli/indicators/</code></td>
@@ -467,66 +444,66 @@ flowchart LR
   </tbody>
 </table>
 
-## 資料源說明
+## 資料源邊界
 
-這個 CLI 的穩定性取決於它封裝的上游市場資料源。
-你應該預設這些情境會發生：
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <strong>這不是 CLI 自身能完全控制的部分</strong>
+      <ul>
+        <li>臨時網路失敗</li>
+        <li>上游限流</li>
+        <li>空響應</li>
+        <li>市場級別的資料源波動</li>
+      </ul>
+    </td>
+    <td width="50%" valign="top">
+      <strong>CLI 的處理原則</strong>
+      <ul>
+        <li>不靜默吞掉失敗。</li>
+        <li>保留錯誤路徑，便於重試與定位。</li>
+        <li>把重試、降頻、切換查詢類型交給調用方決策。</li>
+      </ul>
+    </td>
+  </tr>
+</table>
 
-- 暫時性網路失敗
-- 上游限流
-- 空回應
-- 市場級別的局部故障
+## 擴展方式
 
-CLI 不會把這些失敗「藏起來」，而是保持執行路徑清楚，讓你可以依需要重試、降低刷新頻率，或者切換到別的查詢方式。
+如果你要擴展這個專案，推薦按下面的最小閉環推進：
+
+1. 在 `registry.py` 裡增刪上游函式白名單或幫助文字。
+2. 當出現新的參數類型，再調整 `introspection.py` 的推導與轉換規則。
+3. 當出現新的結果形狀，再擴充 `rendering.py`。
+4. 當某類資料應該具備指標增強，再進入 `enrichment/`。
+5. 最後補充或更新對應的 smoke test。
 
 ## 品質基線
 
-倉庫中包含最小煙霧測試，覆蓋：
+倉庫當前重點覆蓋兩類最小契約：
 
-- 技術指標導出與形狀
-- basic / advanced / full 三檔指標增強行為
+- 技術指標導出與結果形狀
+- `basic / advanced / full` 三檔增強行為
 
-這些測試不追求驗證每個指標的金融意義，而是優先守住命令層與增強層不發生靜默回歸的最小契約。
+目標不是驗證每一個金融指標本身的交易含義，而是盡量防止命令層和增強層出現靜默回歸。
 
-## 如何擴充
-
-如果要擴充專案，最穩妥的路徑是：
-
-1. 在 `registry.py` 中增刪上游暴露函式白名單。
-2. 如果上游 docstring 不完整或不穩定，再補充或規範說明文字。
-3. 如果新參數型別需要新的轉換規則，再修改 `introspection.py`。
-4. 如果回傳結果是新形態，再在 `rendering.py` 中新增渲染器。
-5. 如果某類命令需要指標增強，再更新 `enrichment/`。
-6. 為新增表面補充或更新煙霧測試。
-
-這樣可以把改動控制在局部，避免命令樹退化成一個巨大的單檔案。
-
-## 其他語言文件
+## 相關文件
 
 <table>
-  <thead>
-    <tr>
-      <th>語言</th>
-      <th>檔案</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>簡體中文</td>
-      <td><a href="i18n/README.zh-CN.md">i18n/README.zh-CN.md</a></td>
-    </tr>
-    <tr>
-      <td>繁體中文</td>
-      <td><a href="i18n/README.zh-TW.md">i18n/README.zh-TW.md</a></td>
-    </tr>
-  </tbody>
+  <tr>
+    <td width="50%" valign="top">
+      <strong>設計說明</strong><br />
+      <a href="../docs/cli-设计与使用说明.md">CLI 設計與使用說明</a><br />
+      <a href="../docs/架构设计说明.md">架構設計說明</a>
+    </td>
+    <td width="50%" valign="top">
+      <strong>入口</strong><br />
+      <code>efinance</code><br />
+      <code>efi</code>
+    </td>
+  </tr>
 </table>
 
-## 延伸閱讀
+## License
 
-- [CLI 設計說明](docs/cli-设计与使用说明.md)
-- [架構設計說明](docs/架构设计说明.md)
-
-## 授權
-
-見 [LICENSE](LICENSE)。
+See [../LICENSE](../LICENSE).

@@ -1,298 +1,284 @@
 # efinance-cli
 
 <div align="center">
-
-<p><strong>Agent-friendly CLI for the <code>efinance</code> Python package</strong></p>
-
-<p>
-  Expose upstream market-data APIs as a predictable command tree,
-  normalize output into table / JSON / CSV / TSV,
-  and enrich market data with technical indicators when the result shape allows it.
-</p>
-
-<table>
-  <tr>
-    <td><strong>Python</strong></td>
-    <td><code>&gt;= 3.13</code></td>
-    <td><strong>Primary entrypoints</strong></td>
-    <td><code>efinance</code>, <code>efi</code></td>
-  </tr>
-  <tr>
-    <td><strong>Core stack</strong></td>
-    <td><code>click</code>, <code>efinance</code>, <code>pandas</code>, <code>vortezwohl</code></td>
-    <td><strong>Docs</strong></td>
-    <td><code>README</code> + <code>i18n/</code></td>
-  </tr>
-</table>
-
+  <h1>efinance-cli</h1>
+  <p><strong>Turn <code>efinance</code> into a terminal interface that is easier for humans and agents to reuse</strong></p>
+  <p>Explicit command tree, unified output layer, reusable watch workflow, and optional technical-indicator enrichment.</p>
+  <p>
+    <a href="https://www.python.org/"><img alt="Python 3.13+" src="https://img.shields.io/badge/Python-3.13%2B-2F5D8C"></a>
+    <a href="https://pypi.org/project/click/"><img alt="Click" src="https://img.shields.io/badge/CLI-Click-0F766E"></a>
+    <a href="https://pypi.org/project/efinance/"><img alt="Upstream efinance" src="https://img.shields.io/badge/Upstream-efinance-B45309"></a>
+    <a href="https://pandas.pydata.org/"><img alt="Pandas" src="https://img.shields.io/badge/DataFrame-pandas-1D4ED8"></a>
+  </p>
+  <p>
+    <a href="#30-second-start">30-second start</a> ·
+    <a href="#us-stock-examples">US stock examples</a> ·
+    <a href="#command-map">Command map</a> ·
+    <a href="#indicator-enrichment">Indicator enrichment</a> ·
+    <a href="#project-architecture">Project architecture</a>
+  </p>
 </div>
 
-This project is a command-line product layer around `efinance`, not a thin script bundle. It keeps the surface area explicit and stable by separating command discovery, parameter introspection, execution, rendering, and data enrichment into distinct modules.
-
-## Why this exists
-
-`efinance` already provides a large Python API surface for stocks, funds, bonds, futures, common market queries, and utility lookups. The problem is not capability. The problem is operational consistency:
-
-- API functions are hard to browse quickly from a terminal.
-- Different return types need different presentation rules.
-- Repeated manual wiring becomes brittle when upstream adds or changes functions.
-- Watch-style refresh loops should work consistently across query commands.
-- Some result types can be enriched with technical indicators, but only when the data shape supports it.
-
-`efinance-cli` solves those problems by turning the upstream API into an opinionated terminal interface that is easier for humans and agents to use repeatedly.
-
-## At a glance
+<p align="center"><strong>English | <a href="i18n/README.zh-CN.md">简体中文</a> | <a href="i18n/README.zh-TW.md">繁體中文</a></strong></p>
 
 <table>
-  <thead>
-    <tr>
-      <th>Layer</th>
-      <th>Responsibility</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><code>registry.py</code></td>
-      <td>Curates the exposed upstream module and function list, and attaches command metadata.</td>
-    </tr>
-    <tr>
-      <td><code>introspection.py</code></td>
-      <td>Derives Click parameters from Python signatures and performs lightweight type coercion.</td>
-    </tr>
-    <tr>
-      <td><code>executor.py</code></td>
-      <td>Runs command requests, applies watch loops, and routes output to stdout or files.</td>
-    </tr>
-    <tr>
-      <td><code>rendering.py</code></td>
-      <td>Normalizes DataFrame / Series / dict / list / tuple / set / dataclass / namedtuple output.</td>
-    </tr>
-    <tr>
-      <td><code>enrichment/</code></td>
-      <td>Adds technical indicators to compatible history, latest, and realtime results.</td>
-    </tr>
-  </tbody>
+  <tr>
+    <td width="33%" valign="top">
+      <strong>Predictable</strong><br />
+      Command names map directly to upstream functions, which makes discovery, scripting, and agent orchestration easier.
+    </td>
+    <td width="33%" valign="top">
+      <strong>Consumable</strong><br />
+      Every result lands in <code>table / json / csv / tsv</code>, so you do not need a different post-processing path for every shape.
+    </td>
+    <td width="33%" valign="top">
+      <strong>Extensible</strong><br />
+      Discovery, parameter reflection, execution, rendering, and enrichment stay separated so the CLI can evolve locally instead of turning monolithic.
+    </td>
+  </tr>
 </table>
 
-## Installation
+## What This Is
+
+> `efinance-cli` is not a loose script bundle. It is a command-line product layer built on top of `efinance`.
+
+It compresses the upstream market-data API surface into an explicit command tree, while separating command discovery, parameter introspection, execution, rendering, and technical-indicator enrichment into distinct modules. The goal is not to replace the market library. The goal is to make the existing capability more stable and reusable from a terminal.
+
+## 30-Second Start
+
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <strong>1. Search first</strong>
+      <pre lang="bash"><code>efinance search AAPL --market US_stock --result-count 5 --format json</code></pre>
+      If you only know the ticker or company name, the search entrypoint is the safest place to start.
+    </td>
+    <td width="33%" valign="top">
+      <strong>2. Resolve quote_id</strong>
+      <pre lang="bash"><code>efinance utils get-quote-id AAPL</code></pre>
+      Common US stocks resolve into a unified identifier such as <code>105.AAPL</code>.
+    </td>
+    <td width="33%" valign="top">
+      <strong>3. Query data</strong>
+      <pre lang="bash"><code>efinance stock get-quote-history AAPL --market-type us_stock --beg 20250102 --end 20250501 --limit 20</code></pre>
+      You can keep going from there for history, latest quotes, exports, and downstream processing.
+    </td>
+  </tr>
+</table>
+
+## Why Not Call the Upstream API Directly
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <strong>The issue is not missing capability</strong>
+      <ul>
+        <li>The upstream function surface is large and not easy to browse from a terminal.</li>
+        <li>Different return types need different presentation rules.</li>
+        <li>Cross-cutting concerns like watch, export, transpose, and row limits get rewired repeatedly.</li>
+        <li>Indicator enrichment only makes sense when the result shape is compatible enough.</li>
+      </ul>
+    </td>
+    <td width="50%" valign="top">
+      <strong>The CLI solves for stable operational use</strong>
+      <ul>
+        <li>It turns API capability into a navigable command tree.</li>
+        <li>It centralizes output behavior in one rendering layer.</li>
+        <li>It implements watch as a shared executor feature.</li>
+        <li>It keeps enrichment conservative and shape-aware.</li>
+      </ul>
+    </td>
+  </tr>
+</table>
+
+## US Stock Examples
+
+<details open>
+<summary><strong>Discovery and identifier resolution</strong></summary>
 
 ```bash
-pip install efinance-cli
+efinance search AAPL --market US_stock --result-count 5
+efinance search NVDA --market US_stock --format json
+efinance utils get-quote-id AAPL
 ```
 
-The project targets Python 3.13+ and expects the upstream `efinance` package to be available at runtime. It also depends on `pandas`, because output normalization and indicator enrichment are DataFrame-first by design.
+</details>
 
-If you are developing from source, create or activate the project environment first and then install dependencies from the project metadata.
-
-## Quick start
-
-### Discover a quote
+<details open>
+<summary><strong>History and export</strong></summary>
 
 ```bash
-efinance search 贵州茅台
-efinance search PG --count 10 --format json
-efinance search 腾讯 --market Hongkong
+efinance stock get-quote-history AAPL --market-type us_stock --beg 20250102 --end 20250501 --limit 20
+efinance stock get-quote-history MSFT --market-type us_stock --beg 20250102 --end 20250501 --format csv --output msft-history.csv
+efinance stock get-quote-history TSLA --market-type us_stock --beg 20250102 --end 20250501 --indicator-level advanced --full
 ```
 
-`search` is the safest entrypoint for users and agents that do not already know the exact quote identifier. The command uses local search when available unless `--no-cache` is set.
+</details>
 
-### Query market data
+<details open>
+<summary><strong>Latest quote and watch loop</strong></summary>
 
 ```bash
-efinance stock get-base-info 600519
-efinance stock get-quote-history 600519 --beg 20250101 --end 20250501 --full
-efinance fund get-base-info 161725
-efinance common get-latest-quote 600519
+efinance common get-latest-quote 105.AAPL --format json
+efinance watch --interval 5 common get-latest-quote 105.NVDA --format json
+efinance common get-latest-quote 105.MSFT --format json --output msft-latest.json
 ```
 
-### Refresh in place
+</details>
+
+<details>
+<summary><strong>Output controls</strong></summary>
 
 ```bash
-efinance stock get-realtime-quotes --watch --interval 2
-efinance watch --interval 5 stock get-realtime-quotes
+efinance stock get-quote-history AAPL --market-type us_stock --beg 20250102 --end 20250501 --transpose
+efinance stock get-quote-history AAPL --market-type us_stock --beg 20250102 --end 20250501 --no-index
+efinance stock get-quote-history AAPL --market-type us_stock --beg 20250102 --end 20250501 --format tsv --output aapl.tsv
 ```
 
-The top-level `watch` command wraps any supported subcommand and forwards refresh settings in a uniform way. This is useful when you want one refresh policy for many different query types.
+</details>
 
-## Command surface
+<blockquote>
+  Note: realtime quote stability depends on the upstream market-data source. The CLI keeps failure states visible instead of hiding network volatility.
+</blockquote>
 
-The CLI exposes a curated subset of the upstream `efinance` API.
-Command names are derived from Python function names by converting underscores to hyphens:
-
-- `get_quote_history` → `get-quote-history`
-- `get_realtime_increase_rate` → `get-realtime-increase-rate`
-- `get_realtime_quotes_by_fs` → `get-realtime-quotes-by-fs`
-
-### Top-level commands
+## Command Map
 
 <table>
   <thead>
     <tr>
-      <th>Command</th>
-      <th>Purpose</th>
+      <th align="left">Top-level command</th>
+      <th align="left">Role</th>
+      <th align="left">Typical use</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td><code>search</code></td>
-      <td>Search securities by keyword and optional market filter.</td>
+      <td>Search securities by keyword and optional market enum.</td>
+      <td>The first stop when you do not know the exact identifier yet.</td>
     </tr>
     <tr>
       <td><code>watch</code></td>
       <td>Wrap any supported subcommand with a refresh loop.</td>
+      <td>One polling policy across many commands.</td>
     </tr>
     <tr>
       <td><code>stock</code></td>
-      <td>Stock market queries.</td>
+      <td>Stock-oriented queries.</td>
+      <td>History, snapshots, latest quote, flows, holder data.</td>
     </tr>
     <tr>
       <td><code>fund</code></td>
-      <td>Fund market queries.</td>
+      <td>Fund-oriented queries.</td>
+      <td>Net value, estimated move, positions, report download.</td>
     </tr>
     <tr>
       <td><code>bond</code></td>
-      <td>Bond market queries.</td>
+      <td>Bond-oriented queries.</td>
+      <td>Base info, quotes, historical trade and capital flow.</td>
     </tr>
     <tr>
       <td><code>futures</code></td>
-      <td>Futures market queries.</td>
+      <td>Futures-oriented queries.</td>
+      <td>Base info, realtime quotes, K-line, trade detail.</td>
     </tr>
     <tr>
       <td><code>common</code></td>
-      <td>Shared query entrypoints across multiple asset types.</td>
+      <td>Shared cross-asset query entrypoints.</td>
+      <td>Useful when you already know the <code>quote_id</code>.</td>
     </tr>
     <tr>
       <td><code>utils</code></td>
-      <td>Search and identifier utilities.</td>
+      <td>Search and identifier tooling.</td>
+      <td><code>search-quote</code>, <code>get-quote-id</code>, <code>add-market</code>.</td>
     </tr>
   </tbody>
 </table>
 
-### Module command groups
-
 <details open>
-<summary><strong>stock</strong></summary>
+<summary><strong>Module command groups</strong></summary>
 
-- `get-all-company-performance`
-- `get-all-report-dates`
-- `get-base-info`
-- `get-belong-board`
-- `get-daily-billboard`
-- `get-deal-detail`
-- `get-history-bill`
-- `get-latest-holder-number`
-- `get-latest-ipo-info`
-- `get-latest-quote`
-- `get-members`
-- `get-quote-history`
-- `get-quote-snapshot`
-- `get-realtime-quotes`
-- `get-today-bill`
-- `get-top10-stock-holder-info`
-
-</details>
-
-<details>
-<summary><strong>fund</strong></summary>
-
-- `get-base-info`
-- `get-fund-codes`
-- `get-fund-manager`
-- `get-industry-distribution`
-- `get-invest-position`
-- `get-pdf-reports`
-- `get-period-change`
-- `get-public-dates`
-- `get-quote-history`
-- `get-quote-history-multi`
-- `get-realtime-increase-rate`
-- `get-types-percentage`
-
-</details>
-
-<details>
-<summary><strong>bond</strong></summary>
-
-- `get-all-base-info`
-- `get-base-info`
-- `get-deal-detail`
-- `get-history-bill`
-- `get-quote-history`
-- `get-realtime-quotes`
-- `get-today-bill`
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <strong>stock</strong><br />
+      <code>get-base-info</code><br />
+      <code>get-latest-quote</code><br />
+      <code>get-quote-history</code><br />
+      <code>get-quote-snapshot</code><br />
+      <code>get-realtime-quotes</code><br />
+      <code>get-deal-detail</code><br />
+      <code>get-history-bill</code><br />
+      <code>get-today-bill</code><br />
+      <code>get-top10-stock-holder-info</code><br />
+      <code>get-all-company-performance</code>
+    </td>
+    <td width="33%" valign="top">
+      <strong>fund</strong><br />
+      <code>get-base-info</code><br />
+      <code>get-fund-codes</code><br />
+      <code>get-fund-manager</code><br />
+      <code>get-industry-distribution</code><br />
+      <code>get-invest-position</code><br />
+      <code>get-pdf-reports</code><br />
+      <code>get-period-change</code><br />
+      <code>get-public-dates</code><br />
+      <code>get-quote-history</code><br />
+      <code>get-realtime-increase-rate</code>
+    </td>
+    <td width="33%" valign="top">
+      <strong>bond / futures / common / utils</strong><br />
+      <code>bond.get-base-info</code><br />
+      <code>bond.get-quote-history</code><br />
+      <code>futures.get-futures-base-info</code><br />
+      <code>futures.get-quote-history</code><br />
+      <code>common.get-latest-quote</code><br />
+      <code>common.get-quote-history</code><br />
+      <code>utils.search-quote</code><br />
+      <code>utils.search-quote-locally</code><br />
+      <code>utils.get-quote-id</code><br />
+      <code>utils.add-market</code>
+    </td>
+  </tr>
+</table>
 
 </details>
 
-<details>
-<summary><strong>futures</strong></summary>
-
-- `get-deal-detail`
-- `get-futures-base-info`
-- `get-quote-history`
-- `get-realtime-quotes`
-
-</details>
-
-<details>
-<summary><strong>common</strong></summary>
-
-- `get-base-info`
-- `get-deal-detail`
-- `get-history-bill`
-- `get-latest-quote`
-- `get-quote-history`
-- `get-realtime-quotes-by-fs`
-- `get-today-bill`
-
-</details>
-
-<details>
-<summary><strong>utils</strong></summary>
-
-- `add-market`
-- `get-quote-id`
-- `search-quote`
-- `search-quote-locally`
-
-</details>
-
-## Output model
-
-Every command is rendered through one of four output modes:
+## Output Model
 
 <table>
   <thead>
     <tr>
-      <th>Format</th>
-      <th>Best for</th>
-      <th>Behavior</th>
+      <th align="left">Format</th>
+      <th align="left">Best for</th>
+      <th align="left">Behavior</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td><code>table</code></td>
-      <td>Interactive terminal reading</td>
-      <td>Default mode. Uses a console-friendly table representation for DataFrame-like results.</td>
+      <td>Direct terminal reading</td>
+      <td>Default mode for DataFrame-like results.</td>
     </tr>
     <tr>
       <td><code>json</code></td>
-      <td>Structured downstream processing</td>
-      <td>Serializes DataFrame, Series, dict, dataclass, and namedtuple results into JSON.</td>
+      <td>Agent or script pipelines</td>
+      <td>Best when the next step expects structured data.</td>
     </tr>
     <tr>
       <td><code>csv</code></td>
-      <td>Persistence and interoperability</td>
-      <td>Writes comma-separated output while respecting index and transpose settings.</td>
+      <td>Persistence and exchange</td>
+      <td>Useful for spreadsheets, scripts, and analysis workflows.</td>
     </tr>
     <tr>
       <td><code>tsv</code></td>
       <td>Spreadsheet-friendly export</td>
-      <td>Same as CSV, but uses tab separation.</td>
+      <td>Same model as CSV, but tab-delimited.</td>
     </tr>
   </tbody>
 </table>
 
-Shared output flags:
+Shared runtime flags:
 
 - `--full`
 - `--transpose`
@@ -301,24 +287,22 @@ Shared output flags:
 - `--output PATH`
 - `--encoding utf-8`
 
-These options are applied uniformly across the command tree so agents do not need to re-learn output behavior for every module.
+These flags stay consistent across the entire command tree.
 
-## Watch model
+## Watch Model
 
-Watch support is built into the executor, not copied into every command.
-
-Supported commands can be refreshed in place with:
-
-```bash
-efinance stock get-realtime-quotes --watch --interval 2
-```
-
-Or wrapped explicitly:
-
-```bash
-efinance watch --interval 2 stock get-realtime-quotes
-efinance watch --interval 10 fund get-realtime-increase-rate 161725 005827
-```
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <strong>Inline watch</strong>
+      <pre lang="bash"><code>efinance common get-latest-quote 105.AAPL --watch --interval 5</code></pre>
+    </td>
+    <td width="50%" valign="top">
+      <strong>Top-level wrapper</strong>
+      <pre lang="bash"><code>efinance watch --interval 5 common get-latest-quote 105.AAPL --format json</code></pre>
+    </td>
+  </tr>
+</table>
 
 Shared watch flags:
 
@@ -327,22 +311,18 @@ Shared watch flags:
 - `--count INT`
 - `--clear / --no-clear`
 
-The `watch` wrapper is especially useful when you want a consistent refresh policy across many subcommands without repeating flags everywhere.
+## Indicator Enrichment
 
-## Technical-indicator enrichment
-
-`enrichment/` adds technical indicators when the output shape contains enough price history or realtime rows to support them.
-
-### Indicator levels
+`enrichment/` adds indicator columns when the output shape is compatible enough for history, latest quotes, snapshots, and some realtime lists.
 
 <table>
   <thead>
     <tr>
-      <th>Level</th>
-      <th>Alias</th>
-      <th>History window</th>
-      <th>Realtime limit</th>
-      <th>Typical use</th>
+      <th align="left">Level</th>
+      <th align="left">Alias</th>
+      <th align="left">History window</th>
+      <th align="left">Realtime limit</th>
+      <th align="left">Typical use</th>
     </tr>
   </thead>
   <tbody>
@@ -351,59 +331,55 @@ The `watch` wrapper is especially useful when you want a consistent refresh poli
       <td><code>1</code></td>
       <td>60</td>
       <td>50</td>
-      <td>Core moving-average and oscillator set.</td>
+      <td>Moving averages, RSI, KDJ, MACD, and other core observations.</td>
     </tr>
     <tr>
       <td><code>advanced</code></td>
       <td><code>2</code></td>
       <td>120</td>
       <td>80</td>
-      <td>Trend-strength and channel-style extensions.</td>
+      <td>Trend-strength, channel-style, and broader momentum indicators.</td>
     </tr>
     <tr>
       <td><code>full</code></td>
       <td><code>3</code></td>
       <td>200</td>
       <td>120</td>
-      <td>Broader indicator coverage, including Ichimoku, SAR, pivots, Fibonacci, and support/resistance.</td>
+      <td>Broader coverage including Ichimoku, SAR, pivots, Fibonacci, and support/resistance.</td>
     </tr>
   </tbody>
 </table>
 
-### Where enrichment applies
+The built-in set is broadly grouped as:
 
-- History K-line results for stock, bond, futures, common, and fund history commands.
-- Single-row snapshot results such as stock snapshot or base-info style outputs.
-- Latest quote results.
-- Realtime list results, subject to the configured limit.
+- Trend: MACD, Bollinger Bands, DMI / ADX, SuperTrend, Ichimoku, Donchian, Keltner, Aroon, Parabolic SAR
+- Momentum: RSI, KDJ, ROC, CCI, PPO, TRIX, TSI, Williams %R
+- Volume: OBV, MFI, CMF, PVT, VWAP, Force Index, Volume Ratio
+- Volatility: ATR, NATR, Historical Volatility, Chaikin Volatility, Mass Index
+- Price structure: Pivot Points, Fibonacci Retracement, Rolling Support / Resistance
 
-Enrichment is intentionally conservative. It only adds indicator columns when a compatible source series or frame is available. If the upstream result cannot be mapped cleanly to OHLCV-style data, the original result is returned unchanged.
+## Agent-Friendly Query Path
 
-### What gets added
-
-The project ships a large indicator set, grouped by concern:
-
-- trend indicators: MACD, Bollinger Bands, DMI / ADX, SuperTrend, Ichimoku, Donchian, Keltner, Aroon, Parabolic SAR
-- momentum indicators: RSI, KDJ, ROC, CCI, PPO, TRIX, TSI, Williams %R
-- volume indicators: OBV, MFI, CMF, PVT, VWAP, force index, volume ratio
-- volatility indicators: ATR, NATR, historical volatility, Chaikin volatility, Mass Index
-- price structure indicators: pivot points, Fibonacci retracement, rolling support / resistance
-- Chinese-market style indicators: BBI, BIAS, BRAR, CR, DMA, EMV, MTM, PSY, VR, ASI
-
-## Recommended workflow
-
-When you do not know the exact identifier, use the discovery path first:
-
-```text
-search -> get-quote-id -> module query
+```mermaid
+flowchart LR
+  A["Natural-language intent"] --> B["search"]
+  B --> C["utils get-quote-id"]
+  C --> D["stock / common / futures"]
+  D --> E["rendering.py"]
+  E --> F["table / json / csv / tsv"]
+  D --> G["enrichment/"]
 ```
 
-This avoids most keyword ambiguity and is the most reliable path for agents that operate from a natural-language intent.
+The stable path is:
 
-## Project architecture
+```text
+search -> get-quote-id -> module query -> structured output / file export
+```
+
+## Project Architecture
 
 <details open>
-<summary><strong>How the pipeline works</strong></summary>
+<summary><strong>Execution pipeline</strong></summary>
 
 ```mermaid
 flowchart LR
@@ -418,13 +394,11 @@ flowchart LR
 
 </details>
 
-### File-level responsibilities
-
 <table>
   <thead>
     <tr>
-      <th>File / package</th>
-      <th>Role</th>
+      <th align="left">File / package</th>
+      <th align="left">Role</th>
     </tr>
   </thead>
   <tbody>
@@ -442,7 +416,7 @@ flowchart LR
     </tr>
     <tr>
       <td><code>efinance_cli/registry.py</code></td>
-      <td>Exposed upstream modules, white-listing, and command metadata.</td>
+      <td>Whitelist and command metadata for exposed upstream capability.</td>
     </tr>
     <tr>
       <td><code>efinance_cli/introspection.py</code></td>
@@ -458,7 +432,7 @@ flowchart LR
     </tr>
     <tr>
       <td><code>efinance_cli/enrichment/</code></td>
-      <td>Technical indicator enrichment pipeline.</td>
+      <td>Technical-indicator enrichment on compatible results.</td>
     </tr>
     <tr>
       <td><code>efinance_cli/indicators/</code></td>
@@ -467,65 +441,65 @@ flowchart LR
   </tbody>
 </table>
 
-## Data-source notes
-
-This CLI is only as stable as the upstream market data source it wraps.
-You should assume that live queries can fail for reasons outside the CLI itself:
-
-- temporary network failures
-- upstream rate limiting
-- empty responses
-- market-specific outages
-
-The CLI does not hide those failures. Instead, it keeps the execution path explicit so you can retry, reduce refresh frequency, or switch to a different query type as needed.
-
-## Quality bar
-
-The repository includes smoke tests for:
-
-- technical-indicator exports and shapes
-- enrichment behavior for basic / advanced / full indicator levels
-
-The tests intentionally focus on the minimal contract that keeps the command layer and enrichment layer from regressing silently.
-
-## Extending the CLI
-
-If you want to extend the project, the safest path is:
-
-1. Add or adjust the exposed upstream function list in `registry.py`.
-2. Add or normalize help text if the upstream docstring is incomplete or unstable.
-3. Update `introspection.py` if a new parameter type needs a new coercion rule.
-4. Add a renderer in `rendering.py` if the result shape is new.
-5. Update `enrichment/` if the command family should gain indicator augmentation.
-6. Add or update smoke tests for the new surface.
-
-This keeps change localized and prevents the command tree from turning into a single monolithic file.
-
-## Documentation in other languages
+## Data-Source Boundaries
 
 <table>
-  <thead>
-    <tr>
-      <th>Language</th>
-      <th>File</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>Simplified Chinese</td>
-      <td><a href="i18n/README.zh-CN.md">i18n/README.zh-CN.md</a></td>
-    </tr>
-    <tr>
-      <td>Traditional Chinese</td>
-      <td><a href="i18n/README.zh-TW.md">i18n/README.zh-TW.md</a></td>
-    </tr>
-  </tbody>
+  <tr>
+    <td width="50%" valign="top">
+      <strong>Outside direct CLI control</strong>
+      <ul>
+        <li>Temporary network failures</li>
+        <li>Upstream rate limiting</li>
+        <li>Empty responses</li>
+        <li>Market-source instability</li>
+      </ul>
+    </td>
+    <td width="50%" valign="top">
+      <strong>CLI behavior</strong>
+      <ul>
+        <li>It does not silently hide failures.</li>
+        <li>It keeps the error path visible for retries and diagnosis.</li>
+        <li>Retry cadence and query fallback stay in caller control.</li>
+      </ul>
+    </td>
+  </tr>
 </table>
 
-## Further reading
+## How To Extend It
 
-- [CLI design notes](docs/cli-设计与使用说明.md)
-- [Architecture design notes](docs/架构设计说明.md)
+The safest extension path is:
+
+1. Update the upstream function whitelist or help overrides in `registry.py`.
+2. Extend `introspection.py` only when a new parameter type needs a coercion rule.
+3. Extend `rendering.py` only when a new result shape appears.
+4. Extend `enrichment/` only when a command family should gain indicator augmentation.
+5. Add or update smoke tests for the changed surface.
+
+## Quality Bar
+
+The repository currently protects two minimal contracts:
+
+- indicator exports and result shapes
+- `basic / advanced / full` enrichment behavior
+
+The goal is not to prove the trading semantics of every indicator. The goal is to reduce silent regressions in the command and enrichment layers.
+
+## Related Docs
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <strong>Design notes</strong><br />
+      <a href="docs/cli-设计与使用说明.md">CLI design and usage notes</a><br />
+      <a href="docs/架构设计说明.md">Architecture notes</a>
+    </td>
+    <td width="50%" valign="top">
+      <strong>Entrypoints</strong><br />
+      <code>efinance</code><br />
+      <code>efi</code>
+    </td>
+  </tr>
+</table>
 
 ## License
 
