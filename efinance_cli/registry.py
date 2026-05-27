@@ -12,6 +12,7 @@ from typing import Any
 
 import efinance
 
+from efinance_cli.fund_compat import get_base_info as get_fund_base_info_compat
 from efinance_cli.models import CommandSpec
 
 
@@ -106,6 +107,10 @@ WATCH_UNSUPPORTED_FUNCTIONS: set[tuple[str, str]] = {
     ("utils", "add_market"),
 }
 
+CALLBACK_OVERRIDES: dict[tuple[str, str], Any] = {
+    ("fund", "get_base_info"): get_fund_base_info_compat,
+}
+
 
 def get_module(module_name: str) -> Any:
     """根据模块名获取 efinance 子模块。"""
@@ -135,13 +140,14 @@ def build_command_specs(module_name: str) -> list[CommandSpec]:
         if module_name != "utils" and not module_path.startswith(module.__name__):
             continue
         key = (module_name, name)
+        callback = CALLBACK_OVERRIDES.get(key, obj)
         doc = inspect.getdoc(obj) or ""
         help_text = FUNCTION_HELP_OVERRIDES.get(key) or doc.splitlines()[0] if doc else f"{module_name}.{name}"
         specs.append(
             CommandSpec(
                 module_name=module_name,
                 function_name=name,
-                callback=obj,
+                callback=callback,
                 help_text=help_text,
                 allow_watch=key not in WATCH_UNSUPPORTED_FUNCTIONS,
                 has_side_effect=key in SIDE_EFFECT_FUNCTIONS,
