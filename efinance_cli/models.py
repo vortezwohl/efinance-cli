@@ -102,9 +102,25 @@ class ObservationTraceGroup:
 
 
 @dataclass(slots=True)
+class ObservationSection:
+    """描述 observation 中的通用结果分节。
+
+    Args:
+        name: 分节名称，供 table/json/csv/tsv 统一标识。
+        rows: 分节中的结构化行记录。
+        render_hint: 渲染提示，当前支持 `table` 与 `kv`。
+    """
+
+    name: str
+    rows: list[dict[str, Any]]
+    render_hint: str = "table"
+
+
+@dataclass(slots=True)
 class ObservationPayload:
     meta: dict[str, Any]
     latest_quote: dict[str, Any]
     current_metrics: dict[str, Any]
     trace_points: list[ObservationTraceGroup]
     recent_events: list[ObservationEvent]
+    sections: list[ObservationSection] = field(default_factory=list)

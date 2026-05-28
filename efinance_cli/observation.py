@@ -25,11 +25,15 @@ from efinance_cli.enrichment.service import (
     HISTORY_COMMANDS,
     LATEST_COMMANDS,
     SINGLE_ROW_COMMANDS,
-    REALTIME_LIST_COMMANDS,
     extract_code_from_series,
     fetch_history_for_code,
 )
-from efinance_cli.models import ObservationEvent, ObservationPayload, ObservationTraceGroup
+from efinance_cli.models import (
+    ObservationEvent,
+    ObservationPayload,
+    ObservationSection,
+    ObservationTraceGroup,
+)
 
 
 RAW_FIELD_ALIASES: dict[str, list[str]] = {
@@ -166,7 +170,22 @@ def build_observation_output(request: Any, value: Any) -> Any:
         return build_single_row_observation_output(request, value)
     if command_key in OBSERVATION_REALTIME_LIST_COMMANDS:
         return build_realtime_list_observation_output(request, value)
-    return value
+    return build_generic_observation_output(request, value)
+
+
+def build_generic_observation_output(request: Any, value: Any) -> ObservationPayload:
+    """把未纳入行情 observation 契约的结果包装为通用 observation。"""
+
+    meta = build_generic_meta(request, value)
+    sections = build_generic_sections(value)
+    return ObservationPayload(
+        meta=meta,
+        latest_quote={},
+        current_metrics={},
+        trace_points=[],
+        recent_events=[],
+        sections=sections,
+    )
 
 
 def build_history_observation_output(request: Any, value: Any) -> Any:
@@ -247,6 +266,7 @@ def build_payload_from_history_frame(request: Any, frame: pd.DataFrame) -> Obser
         current_metrics=current_metrics,
         trace_points=trace_points,
         recent_events=recent_events,
+        sections=[],
     )
 
 
@@ -392,6 +412,119 @@ def build_meta(request: Any, frame: pd.DataFrame, latest_quote: dict[str, Any]) 
     if "date" in meta:
         meta["as_of"] = meta.pop("date")
     return meta
+
+
+def build_generic_meta(request: Any, value: Any) -> dict[str, Any]:
+    """构建通用 observation payload 的元信息。"""
+
+    meta = {
+        "module": request.spec.module_name,
+        "function": request.spec.function_name,
+        "view": "observation",
+        "indicator_level": normalize_indicator_level(request.output.indicator_level),
+        "trace_window": normalize_trace_window(request.output.trace_window),
+        "result_type": type(value).__name__,
+    }
+    if isinstance(value, pd.DataFrame):
+        meta["row_count"] = int(len(value))
+        meta["column_count"] = int(len(value.columns))
+    elif isinstance(value, pd.Series):
+        meta["row_count"] = 1
+        meta["column_count"] = int(len(value.index))
+    elif isinstance(value, dict):
+        meta["item_count"] = int(len(value))
+    elif isinstance(value, (list, tuple, set)):
+        meta["item_count"] = int(len(value))
+    return meta
+
+
+def build_generic_sections(value: Any) -> list[ObservationSection]:
+    """根据结果类型构建通用 observation sections。"""
+
+    if isinstance(value, pd.DataFrame):
+        return [ObservationSection(name="result", rows=normalize_dataframe_rows(value), render_hint="table")]
+    if isinstance(value, pd.Series):
+        return [ObservationSection(name="result", rows=[normalize_mapping(value.to_dict())], render_hint="kv")]
+    if isinstance(value, dict):
+        sections: list[ObservationSection] = []
+        for key, item in value.items():
+            section_name = f"result.{key}"
+            if isinstance(item, pd.DataFrame):
+                sections.append(
+                    ObservationSection(
+                        name=section_name,
+                        rows=normalize_dataframe_rows(item),
+                        render_hint="table",
+                    )
+                )
+                continue
+            if isinstance(item, pd.Series):
+                sections.append(
+                    ObservationSection(
+                        name=section_name,
+                        rows=[normalize_mapping(item.to_dict())],
+                        render_hint="kv",
+                    )
+                )
+                continue
+            if isinstance(item, dict):
+                sections.append(
+                    ObservationSection(
+                        name=section_name,
+                        rows=[normalize_mapping(item)],
+                        render_hint="kv",
+                    )
+                )
+                continue
+            if isinstance(item, (list, tuple, set)):
+                sections.append(
+                    ObservationSection(
+                        name=section_name,
+                        rows=normalize_sequence_rows(item),
+                        render_hint="table",
+                    )
+                )
+                continue
+            sections.append(
+                ObservationSection(
+                    name=section_name,
+                    rows=[{"value": normalize_scalar(item)}],
+                    render_hint="kv",
+                )
+            )
+        return sections or [ObservationSection(name="result", rows=[], render_hint="table")]
+    if isinstance(value, (list, tuple, set)):
+        return [ObservationSection(name="result", rows=normalize_sequence_rows(value), render_hint="table")]
+    return [ObservationSection(name="result", rows=[{"value": normalize_scalar(value)}], render_hint="kv")]
+
+
+def normalize_dataframe_rows(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    """把 DataFrame 统一转换为 observation section 行。"""
+
+    if frame.empty:
+        return []
+    records = frame.to_dict(orient="records")
+    return [normalize_mapping(record) for record in records]
+
+
+def normalize_sequence_rows(value: Any) -> list[dict[str, Any]]:
+    """把顺序结果统一转换为 observation section 行。"""
+
+    rows: list[dict[str, Any]] = []
+    for item in list(value):
+        if isinstance(item, dict):
+            rows.append(normalize_mapping(item))
+        elif hasattr(item, "_asdict"):
+            rows.append(normalize_mapping(item._asdict()))
+        else:
+            rows.append({"value": normalize_scalar(item)})
+    return rows
+
+
+def normalize_mapping(mapping: dict[str, Any]) -> dict[str, Any]:
+    """把映射结果递归标准化为基础标量。"""
+
+    return {str(key): normalize_scalar(value) for key, value in mapping.items()}
 
 
 def extract_latest_quote_fields(row: pd.Series) -> dict[str, Any]:

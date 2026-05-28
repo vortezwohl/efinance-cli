@@ -22,6 +22,7 @@ import pandas as pd
 from efinance_cli.models import (
     ObservationEvent,
     ObservationPayload,
+    ObservationSection,
     ObservationTraceGroup,
     OutputOptions,
 )
@@ -205,6 +206,13 @@ def to_serializable(value: Any) -> Any:
             "current_metrics": to_serializable(value.current_metrics),
             "trace_points": to_serializable(value.trace_points),
             "recent_events": to_serializable(value.recent_events),
+            "sections": to_serializable(value.sections),
+        }
+    if isinstance(value, ObservationSection):
+        return {
+            "name": value.name,
+            "rows": to_serializable(value.rows),
+            "render_hint": value.render_hint,
         }
     if isinstance(value, ObservationTraceGroup):
         return {
@@ -236,6 +244,7 @@ def render_observation_table(payload: ObservationPayload, options: OutputOptions
     if payload.latest_quote:
         sections.append(render_boxed_section("latest_quote", render_mapping_lines(payload.latest_quote)))
     sections.append(render_boxed_section("current_metrics", render_mapping_lines(payload.current_metrics)))
+    sections.extend(render_generic_sections_text(payload.sections, options))
     sections.extend(render_trace_groups_text(payload.trace_points))
     sections.append(render_events_text(payload.recent_events))
     return "\n\n".join(section for section in sections if section)
@@ -285,6 +294,28 @@ def render_trace_groups_text(trace_groups: list[ObservationTraceGroup]) -> list[
                 )
         sections.append(render_boxed_section(section_title, block_lines))
     return sections
+
+
+def render_generic_sections_text(
+    sections: list[ObservationSection],
+    options: OutputOptions,
+) -> list[str]:
+    """把通用 observation sections 渲染为 table 文本。"""
+
+    rendered: list[str] = []
+    for section in sections:
+        if section.render_hint == "kv":
+            lines = render_mapping_lines(section.rows[0] if section.rows else {})
+            rendered.append(render_boxed_section(section.name, lines))
+            continue
+
+        frame = pd.DataFrame(section.rows)
+        if frame.empty:
+            rendered.append(render_boxed_section(section.name, ["<empty>"]))
+            continue
+        body = render_dataframe(frame, options)
+        rendered.append(render_boxed_section(section.name, body.splitlines()))
+    return rendered
 
 
 def render_events_text(events: list[ObservationEvent]) -> str:
@@ -469,6 +500,21 @@ def observation_to_long_frame(
                 value=value,
             )
         )
+    for section in payload.sections:
+        for row_index, row in enumerate(section.rows, start=1):
+            row_dict = to_serializable(row)
+            item_id = f"{section.name}_{row_index}"
+            for field, value in row_dict.items():
+                rows.append(
+                    build_long_row(
+                        source=source_value,
+                        section=section.name,
+                        item_type="section_row",
+                        item_id=item_id,
+                        field=str(field),
+                        value=value,
+                    )
+                )
     for group in payload.trace_points:
         for point in group.points:
             bar_offset = point.get("bar_offset")

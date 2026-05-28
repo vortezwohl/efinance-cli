@@ -248,10 +248,14 @@ class CliFullRegressionTest(unittest.TestCase):
         print_observation("search limit=1 输出", limited_result.output)
         print_observation("search 输出文件内容", output_content)
         self.assertEqual(table_result.exit_code, 0, msg=table_result.output)
+        self.assertIn("| meta", table_result.output)
+        self.assertIn("| result", table_result.output)
         self.assertIn("Apple Inc.", table_result.output)
         self.assertIn("105.AAPL", table_result.output)
 
         self.assertEqual(json_result.exit_code, 0, msg=json_result.output)
+        self.assertIn('"meta"', json_result.output)
+        self.assertIn('"sections"', json_result.output)
         self.assertIn('"code": "AAPL"', json_result.output)
         self.assertIn('"quote_id": "105.AAPL"', json_result.output)
 
@@ -261,6 +265,7 @@ class CliFullRegressionTest(unittest.TestCase):
 
         self.assertEqual(output_result.exit_code, 0, msg=output_result.output)
         self.assertTrue(output_exists)
+        self.assertIn('"sections"', output_content)
         self.assertIn('"code": "AAPL"', output_content)
 
     def test_search_watch_mode_uses_executor(self) -> None:
@@ -346,45 +351,41 @@ class CliFullRegressionTest(unittest.TestCase):
         self.assertEqual(result.exit_code, 0, msg=result.output)
         self.assertEqual(mock_search.call_args.kwargs["count"], 1)
 
-    def test_transpose_and_no_index_are_forwarded_to_search_emit(self) -> None:
-        """search 的输出控制参数应透传给渲染层。"""
+    def test_transpose_and_no_index_are_forwarded_to_search_executor(self) -> None:
+        """search 的输出控制参数应透传给统一执行链。"""
 
         captured = {}
         records = build_search_records()
 
-        def fake_emit(executor_self, request, result: InvocationResult) -> None:
+        def fake_run(executor_self, request) -> None:
             captured["request"] = request
-            captured["result"] = result
-            click.echo("EMITTED")
+            click.echo("RUN")
 
         with patch("efinance.utils.search_quote", return_value=records), patch(
-            "efinance_cli.executor.CommandExecutor._emit",
-            new=fake_emit,
+            "efinance_cli.executor.CommandExecutor.run",
+            new=fake_run,
         ):
             result = self.runner.invoke(
                 self.cli,
                 ["search", "AAPL", "--transpose", "--no-index", "--full"],
             )
 
-        print_observation("search emit 输出", result.output)
+        print_observation("search run 输出", result.output)
         print_observation(
-            "search emit 输出选项",
+            "search run 输出选项",
             {
                 "transpose": captured["request"].output.transpose,
                 "no_index": captured["request"].output.no_index,
                 "full": captured["request"].output.full,
+                "view_mode": captured["request"].output.view_mode,
             },
         )
-        print_observation(
-            "search emit DataFrame",
-            captured["result"].value.to_string(index=False),
-        )
         self.assertEqual(result.exit_code, 0, msg=result.output)
-        self.assertIn("EMITTED", result.output)
+        self.assertIn("RUN", result.output)
         self.assertTrue(captured["request"].output.transpose)
         self.assertTrue(captured["request"].output.no_index)
         self.assertTrue(captured["request"].output.full)
-        self.assertIsInstance(captured["result"].value, pd.DataFrame)
+        self.assertEqual(captured["request"].output.view_mode, "observation")
 
     def test_utils_command_specs_survive_mocked_callables(self) -> None:
         """utils 模块命令规格在 mock / wrapper 场景下不应丢失。"""

@@ -452,6 +452,57 @@ class ObservationSmokeTest(unittest.TestCase):
         self.assertEqual(tsv_result.exit_code, 0, msg=tsv_result.output)
         self.assertIn("__source__", tsv_result.output)
 
+    def test_generic_dataframe_command_defaults_to_observation_sections(self) -> None:
+        """未纳入行情契约的普通命令也应默认输出 observation sections。"""
+
+        frame = pd.DataFrame(
+            [
+                {"code": "AAPL", "name": "Apple Inc.", "value": 1},
+                {"code": "MSFT", "name": "Microsoft", "value": 2},
+            ]
+        )
+
+        def fake_invoke(executor_self, request):
+            self.assertEqual(request.spec.module_name, "stock")
+            self.assertEqual(request.spec.function_name, "get_members")
+            self.assertEqual(request.output.view_mode, "observation")
+            return InvocationResult(value=build_observation_output(request, frame))
+
+        with patch("efinance_cli.executor.CommandExecutor.invoke", new=fake_invoke):
+            runner = CliRunner()
+            cli = create_root_command()
+            result = runner.invoke(cli, ["stock", "get-members", "000300"])
+
+        print_observation("generic observation CLI 输出", result.output)
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        self.assertIn("| meta", result.output)
+        self.assertIn("| result", result.output)
+        self.assertIn("Apple Inc.", result.output)
+
+    def test_generic_command_can_explicitly_fallback_to_raw_view(self) -> None:
+        """用户显式请求 raw 时，应保留原始 DataFrame 风格输出。"""
+
+        frame = pd.DataFrame(
+            [
+                {"code": "AAPL", "name": "Apple Inc.", "value": 1},
+                {"code": "MSFT", "name": "Microsoft", "value": 2},
+            ]
+        )
+
+        def fake_invoke(executor_self, request):
+            self.assertEqual(request.output.view_mode, "raw")
+            return InvocationResult(value=frame)
+
+        with patch("efinance_cli.executor.CommandExecutor.invoke", new=fake_invoke):
+            runner = CliRunner()
+            cli = create_root_command()
+            result = runner.invoke(cli, ["stock", "get-members", "000300", "--view", "raw"])
+
+        print_observation("generic raw CLI 输出", result.output)
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        self.assertNotIn("| meta", result.output)
+        self.assertIn("Apple Inc.", result.output)
+
 
 if __name__ == "__main__":
     unittest.main()

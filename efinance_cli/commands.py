@@ -23,7 +23,6 @@ from efinance_cli.introspection import apply_click_parameters, build_parameter_s
 from efinance_cli.models import (
     CommandSpec,
     InvocationRequest,
-    InvocationResult,
     OutputOptions,
     WatchOptions,
 )
@@ -222,18 +221,15 @@ def create_search_command() -> click.Command:
                 clear_screen=clear_screen,
             ),
         )
-        if watch:
-            request.spec = CommandSpec(
-                module_name=request.spec.module_name,
-                function_name=request.spec.function_name,
-                callback=lambda **_: build_frame(),
-                help_text=request.spec.help_text,
-                allow_watch=True,
-                has_side_effect=False,
-            )
-            executor.run(request)
-            return
-        executor._emit(request, InvocationResult(value=build_frame()))
+        request.spec = CommandSpec(
+            module_name=request.spec.module_name,
+            function_name=request.spec.function_name,
+            callback=lambda **_: build_frame(),
+            help_text=request.spec.help_text,
+            allow_watch=True,
+            has_side_effect=False,
+        )
+        executor.run(request)
 
     search_command.help = "根据关键字搜索证券候选项。"
     return search_command

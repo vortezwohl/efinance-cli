@@ -14,7 +14,13 @@ import unittest
 import pandas as pd
 
 from efinance_cli import indicators
-from efinance_cli.models import ObservationEvent, ObservationPayload, ObservationTraceGroup, OutputOptions
+from efinance_cli.models import (
+    ObservationEvent,
+    ObservationPayload,
+    ObservationSection,
+    ObservationTraceGroup,
+    OutputOptions,
+)
 from efinance_cli.rendering import render_csv, render_json, render_table, render_value
 from tests.cli_regression_support import print_observation
 
@@ -105,6 +111,7 @@ def build_observation_payload() -> ObservationPayload:
                 description="ma5 moved from below to above ma10",
             ),
         ],
+        sections=[],
     )
 
 
@@ -264,6 +271,48 @@ class RenderingAndMetricsRegressionTest(unittest.TestCase):
         self.assertIn("__source__", csv_text)
         self.assertIn("105.AAPL,meta,field,module", csv_text)
         self.assertIn("105.MSFT,meta,field,module", csv_text)
+
+    def test_generic_observation_sections_render_across_formats(self) -> None:
+        """通用 observation sections 应在四种格式下保持可读与可消费。"""
+
+        payload = ObservationPayload(
+            meta={
+                "module": "stock",
+                "function": "get_members",
+                "view": "observation",
+                "result_type": "DataFrame",
+            },
+            latest_quote={},
+            current_metrics={},
+            trace_points=[],
+            recent_events=[],
+            sections=[
+                ObservationSection(
+                    name="result",
+                    rows=[
+                        {"code": "AAPL", "name": "Apple Inc.", "value": 1},
+                        {"code": "MSFT", "name": "Microsoft", "value": 2},
+                    ],
+                    render_hint="table",
+                )
+            ],
+        )
+        table_text = render_table(payload, OutputOptions())
+        json_text = render_json(payload)
+        csv_text = render_csv(payload, OutputOptions(no_index=True))
+        tsv_text = render_csv(payload, OutputOptions(no_index=True), sep="\t")
+        print_observation("generic observation table", table_text)
+        print_observation("generic observation json", json_text)
+        print_observation("generic observation csv", csv_text)
+        print_observation("generic observation tsv", tsv_text)
+
+        self.assertIn("| result", table_text)
+        self.assertIn("Apple Inc.", table_text)
+        self.assertIn('"sections"', json_text)
+        self.assertIn('"name": "result"', json_text)
+        self.assertIn("result,section_row,result_1", csv_text)
+        self.assertIn("Apple Inc.", csv_text)
+        self.assertIn("result\tsection_row\tresult_1", tsv_text)
 
     def test_obv_matches_hand_calculated_values(self) -> None:
         """OBV 应与手工累加结果一致。"""
