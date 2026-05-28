@@ -1,0 +1,127 @@
+"""网络重试封装的回归测试。
+
+这个文件覆盖两类风险：
+
+1. 新增的统一网络重试是否真的挂到了原子调用边界上。
+2. 当前实际配置的 `max_retries`、`delay=True` 策略能否缓解短时网络抖动。
+"""
+
+from __future__ import annotations
+
+import inspect
+import unittest
+from unittest.mock import patch
+
+from requests.exceptions import ConnectionError
+from vortezwohl.func.retry import MaxRetriesReachedError
+
+from efinance_cli.registry import get_command_spec
+from efinance_cli.retry_utils import (
+    NETWORK_RELATED_EXCEPTIONS,
+    _NETWORK_RETRY,
+    call_with_network_retry,
+    with_network_retry,
+)
+from tests.cli_regression_support import print_observation
+
+
+def build_flaky_network_call(failures_before_success: int):
+    """构造一个前若干次失败、随后成功的原子网络调用样本。"""
+
+    state = {"count": 0}
+
+    def flaky() -> str:
+        state["count"] += 1
+        if state["count"] <= failures_before_success:
+            raise ConnectionError(f"transient failure #{state['count']}")
+        return "ok"
+
+    return flaky, state
+
+
+class RetryRegressionTest(unittest.TestCase):
+    """验证统一网络重试封装的行为边界。"""
+
+    def test_with_network_retry_preserves_original_signature(self) -> None:
+        """包装后函数应保留原始签名，避免破坏 Click 参数反射。"""
+
+        def sample(symbol: str, limit: int = 10) -> str:
+            return f"{symbol}:{limit}"
+
+        wrapped = with_network_retry(sample)
+        print_observation(
+            "retry 包装前后签名",
+            {
+                "original": str(inspect.signature(sample)),
+                "wrapped": str(inspect.signature(wrapped)),
+            },
+        )
+        self.assertEqual(inspect.signature(sample), inspect.signature(wrapped))
+
+    def test_wrapped_network_call_recovers_after_retry_limit_transient_failures(self) -> None:
+        """当前策略应能容忍前 `max_retries` 次瞬时失败，并在下一次成功时恢复。"""
+
+        max_retries = getattr(_NETWORK_RETRY, "_max_retries", 0)
+        flaky, state = build_flaky_network_call(failures_before_success=max_retries)
+        with patch("vortezwohl.func.retry.sleep", return_value=None):
+            result = call_with_network_retry(flaky)
+
+        print_observation(
+            "retry 上限后恢复",
+            {"result": result, "attempts": state["count"]},
+        )
+        self.assertEqual(result, "ok")
+        self.assertEqual(state["count"], max_retries + 1)
+
+    def test_wrapped_network_call_still_fails_after_retry_limit_transient_failures(self) -> None:
+        """超过上限时应明确失败，而不是无限吞错。"""
+
+        max_retries = getattr(_NETWORK_RETRY, "_max_retries", 0)
+        flaky, state = build_flaky_network_call(failures_before_success=max_retries + 1)
+        with patch("vortezwohl.func.retry.sleep", return_value=None):
+            with self.assertRaises(MaxRetriesReachedError):
+                call_with_network_retry(flaky)
+
+        print_observation("retry 超上限失败次数", {"attempts": state["count"]})
+        self.assertEqual(state["count"], max_retries + 1)
+
+    def test_registry_callbacks_keep_business_function_names_after_wrapping(self) -> None:
+        """注册层包装后，命令回调名仍应保持稳定。"""
+
+        history_spec = get_command_spec("stock", "get_quote_history")
+        search_spec = get_command_spec("utils", "search_quote")
+        print_observation(
+            "retry 包装后的命令规格",
+            {
+                "history_callback": history_spec.callback.__name__,
+                "search_callback": search_spec.callback.__name__,
+            },
+        )
+        self.assertEqual(history_spec.callback.__name__, "get_quote_history")
+        self.assertEqual(search_spec.callback.__name__, "search_quote_compat")
+
+    def test_network_exception_registry_contains_only_base_network_exceptions(self) -> None:
+        """网络异常集合应只保留不可再折叠的基类。"""
+
+        names = sorted({f"{item.__module__}.{item.__name__}" for item in NETWORK_RELATED_EXCEPTIONS})
+        print_observation("network exception registry", names)
+        self.assertEqual(
+            names,
+            [
+                "builtins.OSError",
+                "http.client.BadStatusLine",
+                "http.client.IncompleteRead",
+                "urllib3.exceptions.HTTPError",
+            ],
+        )
+        self.assertEqual(len(NETWORK_RELATED_EXCEPTIONS), 4)
+        self.assertFalse(
+            any(
+                any((other is not item) and issubclass(other, item) for other in NETWORK_RELATED_EXCEPTIONS)
+                for item in NETWORK_RELATED_EXCEPTIONS
+            )
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

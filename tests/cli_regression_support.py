@@ -142,6 +142,22 @@ def build_search_records() -> list[SearchRecord]:
     ]
 
 
+def build_all_optional_option_tokens(leaf: LeafCommand, base_dir: Path) -> list[str]:
+    """为单条命令构造“所有可选参数同时出现一次”的样例调用片段。"""
+
+    tokens: list[str] = []
+    for parameter in leaf.command.params:
+        if not isinstance(parameter, click.Option):
+            continue
+        if parameter.required:
+            continue
+        option_cases = build_option_cases(parameter, base_dir)
+        if not option_cases:
+            continue
+        tokens.extend(option_cases[0][0])
+    return tokens
+
+
 def _build_required_option_tokens(parameter: click.Option) -> list[str]:
     """为必填 option 构造最小命令行片段。"""
     sample = _sample_text_value(parameter.name or "")

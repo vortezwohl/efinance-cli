@@ -24,6 +24,7 @@ from efinance_cli.registry import build_command_specs
 from tests.cli_regression_support import (
     RUNTIME_OUTPUT_OPTION_NAMES,
     RUNTIME_WATCH_OPTION_NAMES,
+    build_all_optional_option_tokens,
     build_option_cases,
     build_required_tokens,
     build_search_records,
@@ -560,6 +561,85 @@ class CliFullRegressionTest(unittest.TestCase):
         print_observation("search 非法 market 输出", result.output)
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("Unknown market enum", result.output)
+
+
+    def test_all_leaf_commands_accept_maximal_sample_invocation(self) -> None:
+        """每个叶子命令在“必填参数 + 所有可选参数样例值”下都应可执行。"""
+
+        captured_requests = []
+
+        def fake_run(executor_self, request) -> None:
+            captured_requests.append(request)
+            click.echo(f"MAXIMAL:{request.spec.module_name}.{request.spec.function_name}")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base_dir = Path(temp_dir)
+            with patch("efinance_cli.executor.CommandExecutor.run", new=fake_run):
+                for leaf in self.leaf_commands:
+                    if leaf.path[0] in {"search", "watch"}:
+                        continue
+                    argv = build_required_tokens(leaf) + build_all_optional_option_tokens(leaf, base_dir)
+                    result = self.runner.invoke(self.cli, argv)
+                    print_observation(f"{leaf.dotted_path} maximal sample 输出", result.output)
+                    self.assertEqual(
+                        result.exit_code,
+                        0,
+                        msg=f"{leaf.dotted_path} maximal sample 执行失败:\n{result.output}",
+                    )
+                    self.assertIn("MAXIMAL:", result.output)
+
+        expected = len(
+            [leaf for leaf in self.leaf_commands if leaf.path[0] not in {"search", "watch"}]
+        )
+        self.assertEqual(len(captured_requests), expected)
+
+    def test_search_accepts_maximal_sample_invocation(self) -> None:
+        """顶层 search 在业务参数和运行时参数同时出现时应保持稳定。"""
+
+        records = build_search_records()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "search-maximal.json"
+            with patch("efinance.utils.search_quote", return_value=records):
+                result = self.runner.invoke(
+                    self.cli,
+                    [
+                        "search",
+                        "--query",
+                        "AAPL",
+                        "--market",
+                        "US_stock",
+                        "--result-count",
+                        "2",
+                        "--use-local-cache",
+                        "--format",
+                        "json",
+                        "--full",
+                        "--transpose",
+                        "--no-index",
+                        "--limit",
+                        "1",
+                        "--output",
+                        str(output_path),
+                        "--encoding",
+                        "utf-8",
+                        "--indicator-level",
+                        "full",
+                        "--view",
+                        "observation",
+                        "--trace-window",
+                        "8",
+                        "--watch",
+                        "--interval",
+                        "0.1",
+                        "--count",
+                        "1",
+                        "--no-clear",
+                    ],
+                )
+
+        print_observation("search maximal sample 输出", result.output)
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        self.assertIn('"meta"', result.output)
 
 
 if __name__ == "__main__":
