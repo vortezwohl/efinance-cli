@@ -48,7 +48,7 @@ class OutputOptions:
     limit: int | None = None
     output_path: str | None = None
     encoding: str = "utf-8"
-    indicator_level: str = "basic"
+    indicator_level: str = "advanced"
     view_mode: str = "observation"
     trace_window: int = 32
 

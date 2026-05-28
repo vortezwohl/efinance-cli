@@ -61,6 +61,7 @@ efinance
 - `--limit N`
 - `--output PATH`
 - `--encoding utf-8`
+- `--indicator-level basic|advanced|full`
 
 说明：
 
@@ -70,6 +71,7 @@ efinance
 - `--full`：不压缩列和长文本
 - `--transpose`：适合单行结果转置后查看
 - `--limit`：只打印前 N 行
+- `--indicator-level`：技术指标丰富度等级，默认 `advanced`
 
 ### 3.1 结构化 observation 视图
 

@@ -256,6 +256,7 @@ class CliFullRegressionTest(unittest.TestCase):
         self.assertTrue(captured["request"].watch.enabled)
         self.assertEqual(captured["request"].watch.count, 2)
         self.assertAlmostEqual(captured["request"].watch.interval, 0.1)
+        self.assertEqual(captured["request"].output.indicator_level, "advanced")
 
     def test_transpose_and_no_index_are_forwarded_to_search_emit(self) -> None:
         """search 的输出控制参数应透传给渲染层。"""
