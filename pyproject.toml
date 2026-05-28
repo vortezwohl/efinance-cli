@@ -14,3 +14,7 @@ dependencies = [
 [project.scripts]
 efinance = "efinance_cli.main:main"
 efi = "efinance_cli.main:main"
+
+[tool.setuptools.packages.find]
+include = ["efinance_cli*"]
+namespaces = false
