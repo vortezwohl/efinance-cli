@@ -1,5 +1,5 @@
 [project]
-name = "efinance-cli"
+name = "the-efinance-cli"
 version = "0.1.0"
 description = "efinance 命令行终端"
 readme = "README.md"
