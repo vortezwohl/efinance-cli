@@ -49,6 +49,8 @@ class OutputOptions:
     output_path: str | None = None
     encoding: str = "utf-8"
     indicator_level: str = "basic"
+    view_mode: str = "raw"
+    trace_window: int = 32
 
 
 @dataclass(slots=True)
@@ -77,3 +79,32 @@ class InvocationResult:
 
     value: Any
     summary: str | None = None
+
+
+@dataclass(slots=True)
+class ObservationEvent:
+    bars_ago: int
+    event_key: str
+    subject_a: str
+    relation: str
+    subject_b: str | None = None
+    prev_a: float | None = None
+    prev_b: float | None = None
+    curr_a: float | None = None
+    curr_b: float | None = None
+    description: str = ""
+
+
+@dataclass(slots=True)
+class ObservationTraceGroup:
+    name: str
+    points: list[dict[str, Any]]
+
+
+@dataclass(slots=True)
+class ObservationPayload:
+    meta: dict[str, Any]
+    latest_quote: dict[str, Any]
+    current_metrics: dict[str, Any]
+    trace_points: list[ObservationTraceGroup]
+    recent_events: list[ObservationEvent]

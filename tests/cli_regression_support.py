@@ -32,6 +32,8 @@ RUNTIME_OUTPUT_OPTION_NAMES = {
     "output_path",
     "encoding",
     "indicator_level",
+    "view_mode",
+    "trace_window",
 }
 
 RUNTIME_WATCH_OPTION_NAMES = {
@@ -160,6 +162,10 @@ def _sample_option_value(parameter: click.Option, base_dir: Path) -> str:
         return "json"
     if name == "indicator_level":
         return "full"
+    if name == "view_mode":
+        return "observation"
+    if name == "trace_window":
+        return "8"
     if name == "interval":
         return "0.25"
     if name in {"limit", "count", "count_refresh", "count_refresh_alias", "result_count"}:

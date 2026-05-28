@@ -71,6 +71,97 @@ efinance
 - `--transpose`：适合单行结果转置后查看
 - `--limit`：只打印前 N 行
 
+### 3.1 结构化 observation 视图
+
+当前首批支持以下命令切换到结构化 observation 输出：
+
+- `common get-quote-history`
+- `common get-latest-quote`
+- `stock get-quote-history`
+- `stock get-latest-quote`
+- `bond get-quote-history`
+- `futures get-quote-history`
+- `fund get-quote-history`
+
+新增运行时参数：
+
+- `--view raw|observation`
+- `--trace-window N`
+
+说明：
+
+- `raw`：保持现有原始/增强后结果渲染路径；
+- `observation`：输出结构化观察结果；
+- `trace_window` 默认值为 `32`；
+- `trace_window` 只控制 observation 展示窗口，不改变指标计算所需历史窗口。
+
+### 3.2 observation 输出契约
+
+observation 模式的核心 section 固定为：
+
+- `meta`
+- `latest_quote`
+- `current_metrics`
+- `trace_points`
+- `recent_events`
+
+其中：
+
+- `trace_points` 始终位于 `recent_events` 之前；
+- 默认只陈列观测事实，不输出 bullish、bearish、confidence、regime 一类预判性总结；
+- 新路径中的字段名、section 名和事件描述统一使用英文。
+
+### 3.3 table / json / csv / tsv 形态差异
+
+- `table`：使用统一 ASCII boxed section 风格，除 `trace_points` 外优先纵向排列；
+- `json`：直接输出结构化 observation payload；
+- `csv` / `tsv`：输出 long-form 长表，和 table/json 保持等价信息量。
+
+`csv` / `tsv` 长表的关键列包括：
+
+- `__source__`
+- `section`
+- `item_type`
+- `item_id`
+- `group`
+- `bar_offset`
+- `event_index`
+- `event_key`
+- `relation`
+- `bars_ago`
+- `field`
+- `value`
+
+### 3.4 boxed table 风格约束
+
+observation 的 `table` 输出不再依赖 `DataFrame.to_string()` 直接宽表展示，而是使用独立 boxed renderer。约束如下：
+
+- 所有 section 使用统一 ASCII 外框；
+- 事件列表使用“一个总外框内列出多条事件”的形式；
+- `trace_points` 允许横向浮点数块，但不用字符图；
+- 超长内容会先折行，再按折行后最长行动态计算宽度；
+- 任意可见内容都不允许穿出右边框。
+
+### 3.5 上线与回退说明
+
+当前 observation 模式采用增量接入策略：
+
+- 仅对首批支持命令生效；
+- 默认仍使用 `raw` 视图，不破坏现有输出习惯；
+- 用户显式传入 `--view observation` 时才进入新路径。
+
+兼容性预期：
+
+- 原有 `table / json / csv / tsv` 在 `raw` 视图下保持既有行为；
+- observation 视图中的 CLI labels 与字段名统一切换为英文；
+- observation 的 `csv / tsv` 契约为 long-form，不再保证“一行一个标的”的宽表形态。
+
+回退策略：
+
+- 若调用方尚未适配 observation 结构，可直接移除 `--view observation`；
+- 若只想保留增强指标而不使用结构化事件与 trace，可继续使用现有 raw/enriched 路径；
+- 结构化 observation 的支持命令范围之外，系统会自动回退为既有结果渲染。
+
 ## 4. 刷新模式
 
 ### 4.1 命令内刷新

@@ -14,7 +14,7 @@ import unittest
 import pandas as pd
 
 from efinance_cli import indicators
-from efinance_cli.models import OutputOptions
+from efinance_cli.models import ObservationEvent, ObservationPayload, ObservationTraceGroup, OutputOptions
 from efinance_cli.rendering import render_csv, render_json, render_table, render_value
 from tests.cli_regression_support import print_observation
 
@@ -37,6 +37,74 @@ def build_wide_frame() -> pd.DataFrame:
                 "特别宽的列名用于验证输出宽度弹性是否足够": "宽列值-2",
             },
         ]
+    )
+
+
+def build_observation_payload() -> ObservationPayload:
+    """构造稳定的 observation payload 样本。"""
+
+    return ObservationPayload(
+        meta={
+            "module": "common",
+            "function": "get_latest_quote",
+            "view": "observation",
+            "indicator_level": "full",
+            "trace_window": 8,
+            "code": "105.AAPL",
+            "name": "Apple Inc.",
+            "as_of": "2026-05-28 15:00:00",
+        },
+        latest_quote={
+            "code": "105.AAPL",
+            "name": "Apple Inc.",
+            "close": 201.23,
+            "change_pct": 1.28,
+        },
+        current_metrics={
+            "close": 201.23,
+            "ma5": 199.81,
+            "ma10": 198.57,
+            "macd_dif": 1.21,
+            "macd_dea": 1.18,
+            "rsi14": 58.42,
+        },
+        trace_points=[
+            ObservationTraceGroup(
+                name="price_ma",
+                points=[
+                    {"bar_offset": -3, "close": 198.11, "ma5": 197.82, "ma10": 197.44},
+                    {"bar_offset": -2, "close": 199.32, "ma5": 198.21, "ma10": 197.91},
+                    {"bar_offset": -1, "close": 200.45, "ma5": 199.02, "ma10": 198.20},
+                    {"bar_offset": 0, "close": 201.23, "ma5": 199.81, "ma10": 198.57},
+                ],
+            ),
+        ],
+        recent_events=[
+            ObservationEvent(
+                bars_ago=-1,
+                event_key="macd_dif_crossed_above_macd_dea",
+                subject_a="macd_dif",
+                relation="crossed_above",
+                subject_b="macd_dea",
+                prev_a=1.12,
+                prev_b=1.15,
+                curr_a=1.21,
+                curr_b=1.18,
+                description="macd_dif moved from below to above macd_dea",
+            ),
+            ObservationEvent(
+                bars_ago=-3,
+                event_key="ma5_crossed_above_ma10",
+                subject_a="ma5",
+                relation="crossed_above",
+                subject_b="ma10",
+                prev_a=195.2,
+                prev_b=195.4,
+                curr_a=195.8,
+                curr_b=195.7,
+                description="ma5 moved from below to above ma10",
+            ),
+        ],
     )
 
 
@@ -112,6 +180,47 @@ class RenderingAndMetricsRegressionTest(unittest.TestCase):
         print_observation("字典分段渲染", text)
         self.assertIn("== 第一组 ==", text)
         self.assertIn("== 第二组 ==", text)
+
+    def test_observation_table_uses_boxed_vertical_layout(self) -> None:
+        """observation table 应使用规整 boxed section，并保留完整 section 信息。"""
+
+        payload = build_observation_payload()
+        text = render_table(payload, OutputOptions())
+        print_observation("observation table 渲染", text)
+
+        self.assertIn("+", text)
+        self.assertIn("| meta", text)
+        self.assertIn("| current_metrics", text)
+        self.assertIn("| trace_points.price_ma", text)
+        self.assertIn("| recent_events", text)
+        self.assertIn("[1] bars_ago: -1", text)
+        self.assertIn("event_key: macd_dif_crossed_above_macd_dea", text)
+
+        for line in text.splitlines():
+            if line.startswith("|"):
+                self.assertTrue(line.endswith("|"), msg=line)
+
+    def test_observation_json_and_long_form_csv_keep_same_signal_information(self) -> None:
+        """observation 的 JSON 与 CSV/TSV 应保留相同核心 section 信息。"""
+
+        payload = build_observation_payload()
+        json_text = render_json(payload)
+        csv_text = render_csv(payload, OutputOptions(no_index=True))
+        tsv_text = render_csv(payload, OutputOptions(no_index=True), sep="\t")
+        print_observation("observation JSON 渲染", json_text)
+        print_observation("observation CSV 渲染", csv_text)
+        print_observation("observation TSV 渲染", tsv_text)
+
+        data = json.loads(json_text)
+        self.assertIn("trace_points", data)
+        self.assertIn("recent_events", data)
+        self.assertEqual(data["meta"]["trace_window"], 8)
+
+        self.assertIn("section,item_type,item_id,group,bar_offset,event_index,event_key,relation,bars_ago,field,value", csv_text)
+        self.assertIn("trace_points,trace_point,price_ma,price_ma,-1", csv_text)
+        self.assertIn("recent_events,event,event_1", csv_text)
+        self.assertIn("macd_dif_crossed_above_macd_dea", csv_text)
+        self.assertIn("section\titem_type\titem_id\tgroup\tbar_offset", tsv_text)
 
     def test_obv_matches_hand_calculated_values(self) -> None:
         """OBV 应与手工累加结果一致。"""
