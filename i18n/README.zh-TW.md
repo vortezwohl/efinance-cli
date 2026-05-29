@@ -1,6 +1,6 @@
 <div align="center">
   <h1>efinance-cli</h1>
-  <p><strong>把 <code>efinance</code> 變成一個更適合人閱讀、腳本呼叫與重複利用的行情命令列工具</strong></p>
+  <p><strong>終端裡的市場資料，專為人、腳本與 Agent 而設計。</strong></p>
   <p>用一套統一命令樹完成證券搜尋、行情 ID 解析、即時行情查看、歷史行情查詢、資料匯出，以及指標資訊更豐富的 <code>observation</code> 結構化輸出。</p>
   <p>
     <a href="https://www.python.org/"><img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-2F5D8C"></a>

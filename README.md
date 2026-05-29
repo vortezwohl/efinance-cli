@@ -1,6 +1,6 @@
 <div align="center">
   <h1>efinance-cli</h1>
-  <p><strong>Turn <code>efinance</code> into a market-data CLI that is easier for humans to read, script, and reuse</strong></p>
+  <p><strong>Market data in your terminal, shaped for humans, scripts, and agents.</strong></p>
   <p>Search instruments, resolve quote IDs, inspect live quotes, review history, export datasets, and read indicator-rich <code>observation</code> output from one consistent command tree.</p>
   <p>
     <a href="https://www.python.org/"><img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-2F5D8C"></a>

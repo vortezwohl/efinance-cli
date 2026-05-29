@@ -1,6 +1,6 @@
 <div align="center">
   <h1>efinance-cli</h1>
-  <p><strong>把 <code>efinance</code> 变成一个更适合人阅读、脚本调用与复用的行情命令行工具</strong></p>
+  <p><strong>终端里的市场数据，专为人、脚本与 Agent 而设计。</strong></p>
   <p>用一套统一命令树完成证券搜索、行情 ID 解析、实时行情查看、历史行情查询、数据导出，以及指标信息丰富的 <code>observation</code> 结构化输出。</p>
   <p>
     <a href="https://www.python.org/"><img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-2F5D8C"></a>
