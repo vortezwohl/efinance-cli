@@ -31,7 +31,7 @@
 - [x] 5.1 为历史回补引入标准补充接口，替换 enrichment 对 `efinance.*.get_quote_history` 的直接依赖。
 - [x] 5.2 调整 observation，使其优先消费标准结果契约字段，而不是继续扩张 provider 原始字段别名。
 - [x] 5.3 为首批共享 capability 建立 observation 与 enrichment 的契约级测试。
-- [ ] 5.4 明确并实现 provider 原始字段到标准字段的兼容下沉策略，避免兼容逻辑散落在 observation 中。
+- [x] 5.4 明确并实现 provider 原始字段到标准字段的兼容下沉策略，避免兼容逻辑散落在 observation 中。
 
 ## 6. 首批共享能力迁移
 
@@ -53,6 +53,6 @@
 
 - [x] 8.1 新增 capability 合同测试，验证同一 capability 在 `efinance` 与 `akshare` 下满足相同核心契约。
 - [x] 8.2 新增 provider 层单元测试，覆盖 handler 路由、支持矩阵、标准化异常和扩展命令约束。
-- [ ] 8.3 重写 CLI 回归测试，使其基于新命令目录与请求 schema，而不是旧函数驱动模型。
-- [ ] 8.4 更新项目文档，说明新命令组织方式、`--backend` 语义、共享命令与扩展命令边界，以及 BREAKING 变更。
+- [x] 8.3 重写 CLI 回归测试，使其基于新命令目录与请求 schema，而不是旧函数驱动模型。
+- [x] 8.4 更新项目文档，说明新命令组织方式、`--backend` 语义、共享命令与扩展命令边界，以及 BREAKING 变更。
 - [ ] 8.5 在首批共享能力全部稳定后，清理旧的 `efinance` 函数驱动注册路径和仅为旧模型服务的兼容代码。

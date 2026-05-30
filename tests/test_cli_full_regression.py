@@ -19,6 +19,7 @@ from unittest.mock import patch
 import click
 from click.testing import CliRunner
 
+from efinance_cli.command_catalog import SHARED_COMMANDS
 from efinance_cli.commands import create_root_command
 from efinance_cli.registry import build_command_specs
 from tests.cli_regression_support import (
@@ -613,6 +614,112 @@ class CliFullRegressionTest(unittest.TestCase):
         )
         self.assertGreaterEqual(len(self.leaf_commands), 35)
         self.assertGreaterEqual(count_all_parameters(self.leaf_commands), 400)
+
+    def test_shared_command_catalog_help_pages_render_successfully(self) -> None:
+        """共享命令目录中的帮助页应直接反映 schema 与 backend 语义。"""
+
+        for definition in SHARED_COMMANDS:
+            result = self.runner.invoke(self.cli, [*definition.cli_path, "--help"])
+            output = result.output.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+            print_observation(
+                f"{' '.join(definition.cli_path)} --help",
+                output.encode("ascii", errors="replace").decode("ascii"),
+            )
+            self.assertEqual(result.exit_code, 0, msg=result.output)
+            self.assertIn(f"命令键: {definition.command_key}", output)
+            self.assertIn(f"能力标识: {definition.capability}", output)
+            self.assertIn("支持后端:", output)
+            self.assertIn("--backend", output)
+            for field in definition.request_schema.fields:
+                self.assertIn(f"--{field.cli_name}", output)
+
+    def test_shared_command_catalog_schema_drives_minimal_invocation(self) -> None:
+        """共享命令目录应能独立作为 CLI 回归输入源。"""
+
+        captured_requests = []
+
+        def fake_run(executor_self, request) -> None:
+            captured_requests.append(request)
+            click.echo(f"SHARED_OK:{request.command_definition.command_key}")
+
+        invocations = [
+            (
+                "instrument.search",
+                ["search", "--query", "AAPL", "--backend", "akshare"],
+            ),
+            (
+                "equity.price.history",
+                [
+                    "equity",
+                    "price",
+                    "history",
+                    "--symbol",
+                    "000001",
+                    "--start-date",
+                    "20260501",
+                    "--end-date",
+                    "20260528",
+                    "--period",
+                    "daily",
+                    "--adjust",
+                    "qfq",
+                    "--backend",
+                    "efinance",
+                ],
+            ),
+            (
+                "equity.profile",
+                ["equity", "profile", "--symbol", "000001", "--backend", "akshare"],
+            ),
+            (
+                "fund.nav.history",
+                ["fund", "nav", "history", "--symbol", "161725", "--backend", "efinance"],
+            ),
+            (
+                "equity.price.live",
+                [
+                    "equity",
+                    "price",
+                    "live",
+                    "--market",
+                    "A_stock",
+                    "--record-limit",
+                    "2",
+                    "--backend",
+                    "akshare",
+                ],
+            ),
+        ]
+
+        with patch("efinance_cli.executor.CommandExecutor.run", new=fake_run):
+            for command_key, argv in invocations:
+                result = self.runner.invoke(self.cli, argv)
+                print_observation(f"{command_key} minimal invocation", result.output)
+                self.assertEqual(result.exit_code, 0, msg=result.output)
+                self.assertIn(f"SHARED_OK:{command_key}", result.output)
+
+        self.assertEqual(
+            [request.command_definition.command_key for request in captured_requests],
+            [item[0] for item in invocations],
+        )
+        self.assertTrue(all(request.spec.module_name == "shared" for request in captured_requests))
+        self.assertTrue(all(request.command_definition is not None for request in captured_requests))
+
+    def test_shared_command_catalog_rejects_missing_required_schema_fields(self) -> None:
+        """共享命令的必填参数应按 request schema 直接失败。"""
+
+        cases = [
+            ("search", ["search"], "Missing option '--query'"),
+            ("equity.price.history", ["equity", "price", "history"], "Missing required option '--symbol'"),
+            ("equity.profile", ["equity", "profile"], "Missing required option '--symbol'"),
+            ("fund.nav.history", ["fund", "nav", "history"], "Missing required option '--symbol'"),
+        ]
+
+        for title, argv, expected in cases:
+            result = self.runner.invoke(self.cli, argv)
+            print_observation(f"{title} missing required field", result.output)
+            self.assertNotEqual(result.exit_code, 0)
+            self.assertIn(expected, result.output)
 
     def test_watch_without_subcommand_raises_click_exception(self) -> None:
         """watch 缺少子命令时应返回可读错误。"""

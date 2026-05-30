@@ -19,6 +19,14 @@ from typing import Any, Iterable
 
 import pandas as pd
 
+from efinance_cli.contracts import (
+    FUND_NAV_HISTORY_CONTRACT,
+    HISTORY_BARS_CONTRACT,
+    PROFILE_INFO_CONTRACT,
+    REALTIME_QUOTES_CONTRACT,
+    ResultContract,
+    normalize_contract_mapping,
+)
 from efinance_cli.enrichment.indicators import enrich_history_frame
 from efinance_cli.enrichment.levels import LEVELS, normalize_indicator_level
 from efinance_cli.enrichment.service import (
@@ -155,6 +163,13 @@ OBSERVATION_REALTIME_LIST_COMMANDS: set[tuple[str, str]] = {
 }
 OBSERVATION_REALTIME_LIST_COMMANDS.update(SHARED_REALTIME_LIST_COMMANDS)
 
+SHARED_OBSERVATION_CONTRACTS: dict[str, ResultContract] = {
+    "equity.price.history": HISTORY_BARS_CONTRACT,
+    "equity.profile": PROFILE_INFO_CONTRACT,
+    "fund.nav.history": FUND_NAV_HISTORY_CONTRACT,
+    "equity.price.live": REALTIME_QUOTES_CONTRACT,
+}
+
 
 def build_observation_output(request: Any, value: Any) -> Any:
     """根据命令与结果构建 observation 输出。
@@ -164,6 +179,7 @@ def build_observation_output(request: Any, value: Any) -> Any:
 
     if getattr(request.output, "view_mode", "raw") != "observation":
         return value
+    value = normalize_shared_observation_input(request, value)
 
     command_key = (request.spec.module_name, request.spec.function_name)
     if (
@@ -179,6 +195,69 @@ def build_observation_output(request: Any, value: Any) -> Any:
     if command_key in OBSERVATION_REALTIME_LIST_COMMANDS:
         return build_realtime_list_observation_output(request, value)
     return build_generic_observation_output(request, value)
+
+
+def normalize_shared_observation_input(request: Any, value: Any) -> Any:
+    """在 observation 入口按共享结果契约归一化 provider 风格字段。
+
+    设计约束：
+    - 共享命令优先消费契约层定义的字段别名，而不是在 observation 内部继续散写映射；
+    - 旧函数驱动命令仍然保留现有宽松兼容逻辑，不在这里强行改写；
+    - 归一化时保留原始字段，便于 generic observation 或调试路径继续查看 provider 数据。
+    """
+
+    if getattr(request.spec, "module_name", None) != "shared":
+        return value
+
+    contract = SHARED_OBSERVATION_CONTRACTS.get(getattr(request.spec, "function_name", ""))
+    if contract is None:
+        return value
+
+    if isinstance(value, pd.DataFrame):
+        return normalize_shared_observation_frame(value, contract)
+    if isinstance(value, pd.Series):
+        return pd.Series(normalize_shared_observation_mapping(value.to_dict(), contract))
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            if isinstance(item, pd.DataFrame):
+                normalized[key] = normalize_shared_observation_frame(item, contract)
+            elif isinstance(item, pd.Series):
+                normalized[key] = pd.Series(normalize_shared_observation_mapping(item.to_dict(), contract))
+            elif isinstance(item, dict):
+                normalized[key] = normalize_shared_observation_mapping(item, contract)
+            else:
+                normalized[key] = item
+        return normalized
+    if isinstance(value, list):
+        return [
+            normalize_shared_observation_mapping(item, contract) if isinstance(item, dict) else item
+            for item in value
+        ]
+    return value
+
+
+def normalize_shared_observation_frame(frame: pd.DataFrame, contract: ResultContract) -> pd.DataFrame:
+    """按共享结果契约归一化 DataFrame 行。"""
+
+    if frame.empty:
+        return frame.copy()
+    rows = [
+        normalize_shared_observation_mapping(record, contract)
+        for record in frame.to_dict(orient="records")
+    ]
+    return pd.DataFrame(rows)
+
+
+def normalize_shared_observation_mapping(mapping: dict[str, Any], contract: ResultContract) -> dict[str, Any]:
+    """按共享结果契约归一化单条记录，并保留原始字段。"""
+
+    normalized = normalize_contract_mapping(mapping, contract)
+    merged = dict(normalized)
+    for key, value in mapping.items():
+        if key not in merged:
+            merged[key] = value
+    return merged
 
 
 def build_generic_observation_output(request: Any, value: Any) -> ObservationPayload:

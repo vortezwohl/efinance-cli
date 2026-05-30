@@ -1,31 +1,33 @@
 # efinance-cli 设计与使用说明
 
-## 1. 项目定位
+## 1. 文档定位
 
-`efinance-cli` 是一个面向人类用户与 Agent 的金融数据命令行工具。
+本文档说明当前版本 `efinance-cli` 的命令组织方式、后端选择语义与迁移边界。
 
-当前版本的核心设计目标有两条：
+当前版本已经不再把 CLI 视为 `efinance` 上游函数的自然语言包装，而是逐步重构为：
 
-1. 参数语义化  
-   不再让 CLI 用户直接记忆底层 Python API 的缩写和命名习惯。
+- 以后端无关的共享命令为主；
+- 以 provider 扩展命令补充后端特有能力；
+- 以统一请求 schema、统一结果契约和统一执行骨架承载运行时行为。
 
-2. 命令自然化  
-   不再把上游函数名简单改成短横线，而是按“任务名”组织命令树。
+这意味着用户需要优先理解“能力”和“命令语义”，而不是去记忆某个第三方库的函数名。
 
-因此，CLI 的目标不是做一个“API 浏览器”，而是做一套：
+## 2. 当前命令模型
 
-- 易猜
-- 易记
-- 低歧义
-- 可扩展
+当前 CLI 处于迁移期，同时存在三类命令：
 
-的任务导向命令体系。
+1. 共享命令  
+   面向稳定业务语义，命令入口和参数定义尽量与具体后端解耦。
 
----
+2. provider 扩展命令  
+   保留后端专属能力，不强行压成共享最小公分母。
 
-## 2. 顶层命令树
+3. 旧函数驱动命令  
+   仍然存在于命令树中，用于迁移过渡；但它们不再是后续架构演进的核心对象。
 
-当前用户可见的顶层入口如下：
+## 3. 顶层命令树
+
+当前用户可见的顶层入口包含：
 
 ```text
 efinance
@@ -37,72 +39,98 @@ efinance
 ├─ futures
 ├─ quote
 ├─ market
-└─ resolve
+├─ resolve
+├─ instrument
+├─ equity
+└─ akshare
 ```
 
 说明：
 
-- `search`：按关键字搜索证券；
-- `watch`：为任意子命令开启循环刷新；
-- `stock` / `fund` / `bond` / `futures`：面向普通用户的业务域命令；
-- `quote`：高级通用入口，适合已知 `quote_id` 的场景；
-- `market`：市场级扫描与市场扩展；
-- `resolve`：把关键字或代码解析为内部行情标识。
+- `search` 是共享命令 `instrument.search` 的顶层快捷入口；
+- `instrument`、`equity`、`fund` 中的共享命令逐步进入新的 capability 架构；
+- `stock`、`bond`、`futures`、`quote`、`market`、`resolve` 仍包含较多旧函数驱动命令；
+- `akshare` 是 provider 扩展命令根组，用于承载 `akshare` 特有能力；
+- `watch` 是统一的循环刷新包装命令，会复用同一条请求解析与执行链路。
 
-已不再把 `common` / `utils` 暴露为默认用户入口。
+## 4. 共享命令与 provider 扩展命令
 
----
+### 4.1 共享命令
 
-## 3. 命令组织原则
+共享命令的目标是为相同业务能力提供稳定入口。当前已经落地的共享命令如下：
 
-## 3.1 命令按任务组织
+| 命令键 | CLI 路径 | 说明 | 支持后端 |
+| --- | --- | --- | --- |
+| `instrument.search` | `search` / `instrument search` | 搜索证券候选项 | `efinance`、`akshare` |
+| `equity.price.history` | `equity price history` | 权益类历史行情 | `efinance`、`akshare` |
+| `equity.price.live` | `equity price live` | 权益类实时行情列表 | `efinance`、`akshare` |
+| `equity.profile` | `equity profile` | 权益类基础资料 | `efinance`、`akshare` |
+| `fund.nav.history` | `fund nav history` | 基金净值历史 | `efinance`、`akshare` |
 
-命令路径优先表达用户任务，而不是底层函数名。
+共享命令的共同特征：
 
-例如：
+- 参数来自显式 request schema，而不是第三方函数签名反射；
+- 帮助页会显示命令键、能力标识、支持后端与命令类别；
+- 非 raw 视图会进入统一的标准化、增强、observation 与渲染管线；
+- raw 视图会保留 `raw_payload`、`provider_fields`、`metadata` 等 provider 原始上下文。
 
-- `stock price history`
-- `stock price latest`
-- `stock flow today`
-- `fund reports download`
-- `resolve quote-id`
+### 4.2 provider 扩展命令
 
-而不是：
+provider 扩展命令用于保留特定后端独有能力。当前已经落地的示例是：
 
-- `stock get-quote-history`
-- `stock get-latest-quote`
-- `stock get-today-bill`
-- `fund get-pdf-reports`
-- `utils get-quote-id`
+```bash
+efinance akshare industry boards
+```
 
-## 3.2 同类能力共享同一骨架
+该命令表示：
 
-行情类统一为：
+- 命令语义属于 `akshare` 专属扩展；
+- 它不伪装成跨后端共享能力；
+- 仍然复用统一执行骨架与结果契约；
+- 错误地显式指定其他 backend 时，会明确失败，而不是静默降级。
 
-- `price latest`
-- `price history`
-- `price live`
-- `price snapshot`
+未来 `yfinance` 若接入，也会遵循同样的扩展命令挂载方式。
 
-资金流类统一为：
+## 5. `--backend` 语义
 
-- `flow today`
-- `flow history`
+`--backend` 是共享命令和 provider 扩展命令的统一后端选择参数。
 
-成交类统一为：
+### 5.1 共享命令
 
-- `trades`
+共享命令支持显式传入 `--backend`：
 
-基础资料类统一为：
+```bash
+efinance equity price history --symbol 600519 --backend efinance
+efinance equity price history --symbol 600519 --backend akshare
+efinance fund nav history --symbol 161725 --backend akshare
+```
 
-- `profile`
+规则如下：
 
----
+- 不传 `--backend` 时，默认使用 `efinance`；
+- 显式传入的 backend 必须在该命令的支持矩阵内；
+- 不受支持的 backend 会直接报错，不会偷偷回退到默认后端。
 
-## 4. 通用运行时参数
+### 5.2 provider 扩展命令
 
-所有查询型命令默认支持以下运行时参数：
+provider 扩展命令也接受 `--backend`，但其默认行为不同：
 
+```bash
+efinance akshare industry boards
+efinance akshare industry boards --backend akshare
+```
+
+规则如下：
+
+- 不传 `--backend` 时，默认解析到所属 provider；
+- 显式传入相同 provider 允许执行；
+- 显式传入其他 provider 会明确失败。
+
+## 6. 统一运行时参数
+
+共享命令与 provider 扩展命令统一支持以下运行时参数：
+
+- `--backend`
 - `--format table|json|csv|tsv`
 - `--full`
 - `--transpose`
@@ -120,288 +148,67 @@ efinance
 
 说明：
 
-- `table`：默认控制台表格输出；
-- `json`：适合 Agent 或脚本继续处理；
-- `csv/tsv`：适合导出或二次分析；
-- `--indicator-level`：控制技术指标丰富度；
-- `--view observation`：输出结构化观察视图；
-- `--count`：统一只表示刷新次数，不表示业务数量。
+- `--view raw` 适合调试 provider 差异、核对原始字段和扩展字段；
+- `--view observation` 适合统一阅读结构化观察结果；
+- `watch` 顶层包装命令与命令内 `--watch` 会复用同一请求对象和同一 backend 解析逻辑；
+- `--count` 仅表示刷新次数，不表示业务记录数量。
 
----
+## 7. 当前推荐用法
 
-## 5. 顶层命令
-
-## 5.1 `search`
-
-用于按关键字搜索证券候选项。
-
-示例：
+### 7.1 共享搜索
 
 ```bash
 efinance search --query 贵州茅台
-efinance search --query PG --result-count 10 --format json
-efinance search --query 腾讯 --market Hongkong
+efinance instrument search --query 腾讯 --backend akshare --format json
 ```
 
-### 5.1.1 `search local`
-
-用于仅依赖本地缓存进行搜索。
-
-示例：
+### 7.2 权益类历史与实时
 
 ```bash
-efinance search local --query 苹果 --market US_stock
+efinance equity price history --symbol 600519 --start-date 20250101 --end-date 20250501
+efinance equity price history --symbol 600519 --backend akshare --view raw --format json
+efinance equity price live --backend efinance --record-limit 20
+efinance watch --interval 3 equity price live --backend akshare --record-limit 10
 ```
 
-## 5.2 `watch`
-
-用于为任意子命令开启循环刷新。
-
-示例：
+### 7.3 权益类资料与基金净值
 
 ```bash
-efinance watch --interval 2 stock price live
-efinance watch --interval 5 fund estimate live --symbols 161725 --symbols 005827
+efinance equity profile --symbol 000001
+efinance equity profile --symbol 000001 --backend akshare --view raw
+efinance fund nav history --symbol 161725
+efinance fund nav history --symbol 161725 --backend akshare --format json
 ```
 
----
-
-## 6. 各业务域命令
-
-## 6.1 股票 `stock`
-
-主要命令：
-
-- `profile`
-- `price latest`
-- `price history`
-- `price live`
-- `price snapshot`
-- `flow today`
-- `flow history`
-- `trades`
-- `holders latest-count`
-- `holders top10`
-- `ipo latest`
-- `leaderboard daily`
-- `performance quarterly`
-- `report-dates`
-- `constituents`
-- `sector`
-
-示例：
+### 7.4 provider 扩展能力
 
 ```bash
-efinance stock profile --symbols 600519
-efinance stock price history --symbols 600519 --start-date 20250101 --end-date 20250501 --full
-efinance stock price live --market ETF --limit 20
-efinance stock flow today --symbol 600519
-efinance stock constituents --symbol 000300
+efinance akshare industry boards
 ```
 
-## 6.2 基金 `fund`
+## 8. BREAKING 变化
 
-主要命令：
+当前版本相对于旧的函数驱动 CLI，有以下重要变化：
 
-- `catalog`
-- `profile`
-- `nav history`
-- `nav history-batch`
-- `estimate live`
-- `allocation industry`
-- `allocation position`
-- `allocation types`
-- `performance period`
-- `disclosure dates`
-- `managers`
-- `reports download`
+1. 命令稳定对象已经从“第三方函数”转为“命令键 + capability + request schema”。
+2. 共享命令的参数定义不再承诺与 `efinance` 上游函数签名一一对应。
+3. 同一业务命令在不同后端下允许存在字段完整度差异，但会努力满足相同核心结果契约。
+4. provider 特有能力不再强行伪装成通用命令，而是挂到各自扩展命令根组。
+5. `--backend` 选择失败时会显式报错，不再依赖隐式兼容或静默回退。
 
-示例：
+## 9. 迁移期边界
 
-```bash
-efinance fund profile --symbol 161725
-efinance fund nav history --symbol 161725 --max-pages 200
-efinance fund nav history-batch --symbols 161725 --symbols 005827
-efinance fund estimate live --symbols 161725 --symbols 005827 --watch --interval 10
-efinance fund reports download --symbol 161725 --output-dir reports
-```
+当前版本仍是迁移中的过渡态，需要明确以下边界：
 
-## 6.3 债券 `bond`
+- 并非所有旧命令都已迁移到共享 capability 架构；
+- 旧函数驱动命令仍可使用，但不建议把它们当作长期稳定接口；
+- `yfinance` 目前仅预留 optional provider 挂载点，尚未实现具体能力；
+- 某些 observation 与 enrichment 路径仍同时兼容旧结果形态与新标准契约。
 
-主要命令：
+如果你在扩展新命令，应优先判断它属于：
 
-- `catalog`
-- `profile`
-- `price live`
-- `price history`
-- `flow today`
-- `flow history`
-- `trades`
+- 共享能力；
+- provider 专属扩展；
+- 还是仅用于迁移过渡的旧路径兼容。
 
-示例：
-
-```bash
-efinance bond profile --symbol 123107
-efinance bond price history --symbol 123107 --start-date 20250101 --end-date 20250501
-efinance bond flow today --symbol 123107
-```
-
-## 6.4 期货 `futures`
-
-主要命令：
-
-- `catalog`
-- `price live`
-- `price history`
-- `trades`
-
-示例：
-
-```bash
-efinance futures catalog
-efinance futures price history --quote-id 东方财富期货行情ID
-efinance futures price live
-```
-
-说明：
-
-- 期货历史行情通常更依赖 `quote_id` 访问。
-
-## 6.5 高级通用入口 `quote`
-
-主要命令：
-
-- `profile`
-- `price latest`
-- `price history`
-- `flow today`
-- `flow history`
-- `trades`
-
-适用场景：
-
-- 已知 `quote_id`；
-- 跨品类统一访问；
-- 需要绕过具体业务域直接调通用行情入口。
-
-示例：
-
-```bash
-efinance quote price latest --quote-ids 105.AAPL
-efinance quote price history --symbols 105.AAPL --start-date 20250101 --end-date 20250501
-efinance quote flow history --symbol 105.AAPL
-```
-
-## 6.6 市场入口 `market`
-
-主要命令：
-
-- `price live`
-- `add`
-
-说明：
-
-- `market price live` 是按市场过滤串进行的大盘级扫描入口；
-- `market add` 用于扩展本地市场分类映射，属于高级/带副作用能力。
-
-示例：
-
-```bash
-efinance market price live --market "m:105+t:3"
-efinance market add --market-category custom --market-id 999 --market-name my_market
-```
-
-## 6.7 解析入口 `resolve`
-
-主要命令：
-
-- `quote-id`
-
-示例：
-
-```bash
-efinance resolve quote-id --symbol AAPL --market US_stock
-```
-
----
-
-## 7. Observation 视图
-
-当前 observation 视图支持以下类型的命令：
-
-- 历史行情类：
-  - `quote price history`
-  - `stock price history`
-  - `bond price history`
-  - `futures price history`
-  - `fund nav history`
-  - `fund nav history-batch`
-- 最新/快照/基础资料类：
-  - `quote price latest`
-  - `stock price latest`
-  - `stock price snapshot`
-  - `stock profile`
-  - `bond profile`
-  - `quote profile`
-- 实时列表类：
-  - `stock price live`
-  - `bond price live`
-  - `futures price live`
-
-当前暂未纳入首批 observation 深度支持：
-
-- `fund estimate live`
-- `market price live`
-
-### 7.1 Observation 结构
-
-observation 模式的核心 section 固定为：
-
-- `meta`
-- `latest_quote`
-- `current_metrics`
-- `trace_points`
-- `recent_events`
-
-### 7.2 输出差异
-
-- `table`：使用统一 boxed section 风格；
-- `json`：直接输出结构化 observation payload；
-- `csv/tsv`：输出 long-form 长表，保留与 `table/json` 等价的信息量。
-
----
-
-## 8. 面向 Agent 的使用建议
-
-推荐默认查询链路：
-
-1. `search`
-2. `resolve quote-id`
-3. 各领域命令或 `quote` 高级入口
-
-推荐策略：
-
-- 需要用户可理解的查询时，优先走 `stock/fund/bond/futures`；
-- 已知 `quote_id` 或要做跨品类统一处理时，再走 `quote`；
-- 需要做市场扫描时，走 `market`；
-- 尽量优先使用 `--format json` 供后续程序消费。
-
----
-
-## 9. 当前实现边界
-
-当前版本已经完成：
-
-- 语义化命令树；
-- 语义化参数命名；
-- 统一输出层；
-- observation 视图；
-- 循环刷新；
-- 顶层 `search` / `watch` / `resolve` / `market` 入口。
-
-后续仍可继续增强：
-
-- 更多命令接入 observation 深度支持；
-- 更细粒度的帮助文本与命令别名策略；
-- 更智能的市场枚举提示与自动补全；
-- 更完善的外部数据源重试与降级策略。
+不要再把新的用户能力直接绑定到第三方函数名上。

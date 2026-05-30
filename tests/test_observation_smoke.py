@@ -346,6 +346,18 @@ class ObservationSmokeTest(unittest.TestCase):
         self.assertTrue(payload.trace_points)
         self.assertTrue(payload.recent_events)
 
+    def test_shared_equity_history_observation_normalizes_provider_alias_columns(self) -> None:
+        """共享 equity history 应优先通过契约层别名兼容 provider 风格列名。"""
+
+        frame = build_history_frame().copy()
+        payload = build_observation_output(build_shared_equity_history_request(trace_window=4), frame)
+
+        print_observation("shared equity history alias payload", payload)
+        self.assertIsInstance(payload, ObservationPayload)
+        self.assertEqual(payload.meta["code"], "AAPL")
+        self.assertEqual(payload.latest_quote["close"], 106.0)
+        self.assertIn("close", payload.current_metrics)
+
     def test_shared_history_lookup_uses_standard_supplement_interface(self) -> None:
         """共享命令的历史回补应优先走标准补充接口，而不是旧 provider 直连。"""
 
@@ -431,6 +443,49 @@ class ObservationSmokeTest(unittest.TestCase):
         self.assertEqual(payload.latest_quote["code"], "000001")
         self.assertIn("close", payload.current_metrics)
         mock_fetch.assert_called_once()
+
+    def test_shared_equity_profile_observation_normalizes_provider_alias_fields(self) -> None:
+        """共享权益资料 observation 应通过契约层兼容 provider 风格字段。"""
+
+        profile_row = pd.Series(
+            {
+                "股票代码": "000001",
+                "股票名称": "平安银行",
+                "市盈率(动)": 5.1,
+                "所处行业": "银行",
+            }
+        )
+        history_frame = build_history_frame().rename(
+            columns={
+                "股票代码": "symbol",
+                "股票名称": "name",
+                "日期": "date",
+                "收盘": "close",
+                "开盘": "open",
+                "最高": "high",
+                "最低": "low",
+                "成交量": "volume",
+            }
+        )
+        history_frame["symbol"] = "000001"
+
+        with patch(
+            "efinance_cli.observation.fetch_standard_history_for_request",
+            return_value=history_frame,
+        ), patch(
+            "efinance_cli.observation.enrich_history_frame",
+            side_effect=lambda frame, level: frame,
+        ):
+            payload = build_observation_output(
+                build_shared_equity_profile_request(),
+                profile_row,
+            )
+
+        print_observation("shared equity profile alias payload", payload)
+        self.assertIsInstance(payload, ObservationPayload)
+        self.assertEqual(payload.meta["code"], "000001")
+        self.assertEqual(payload.latest_quote["name"], "平安银行")
+        self.assertEqual(payload.current_metrics["close"], 106.0)
 
     def test_shared_fund_nav_history_falls_back_to_generic_observation_sections(self) -> None:
         """共享基金净值历史当前应稳定走 generic observation 输出。"""
@@ -672,6 +727,49 @@ class ObservationSmokeTest(unittest.TestCase):
         self.assertIsInstance(payloads, dict)
         self.assertEqual(len(payloads), 2)
         self.assertEqual(set(payloads.keys()), {"000001", "000002"})
+
+    def test_shared_equity_live_observation_normalizes_provider_alias_rows(self) -> None:
+        """共享 equity live 应通过契约层兼容 provider 风格实时字段。"""
+
+        request = build_shared_equity_live_request(trace_window=4, limit=2)
+        frame = pd.DataFrame(
+            [
+                {"代码": "000001", "名称": "平安银行", "最新价": 10.5},
+                {"代码": "000002", "名称": "万科A", "最新价": 9.8},
+                {"代码": "000333", "名称": "美的集团", "最新价": 65.2},
+            ]
+        )
+
+        def fake_fetch_standard(request_obj, code, level):
+            sample = build_history_frame().rename(
+                columns={
+                    "股票代码": "symbol",
+                    "股票名称": "name",
+                    "日期": "date",
+                    "收盘": "close",
+                    "开盘": "open",
+                    "最高": "high",
+                    "最低": "low",
+                    "成交量": "volume",
+                }
+            ).copy()
+            sample["symbol"] = code
+            sample["name"] = code
+            return sample
+
+        with patch(
+            "efinance_cli.observation.fetch_standard_history_for_request",
+            side_effect=fake_fetch_standard,
+        ), patch(
+            "efinance_cli.observation.enrich_history_frame",
+            side_effect=lambda history, level: history,
+        ):
+            payloads = build_observation_output(request, frame)
+
+        print_observation("shared equity live alias payloads", payloads)
+        self.assertIsInstance(payloads, dict)
+        self.assertEqual(set(payloads.keys()), {"000001", "000002"})
+        self.assertEqual(payloads["000001"].latest_quote["name"], "平安银行")
 
     def test_fund_history_multi_cli_can_render_multi_source_observation_formats(self) -> None:
         """fund get-quote-history-multi 应在多种格式下输出 multi-source observation。"""
