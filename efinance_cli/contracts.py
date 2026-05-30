@@ -34,18 +34,40 @@ class ResultContract:
     contract_name: str
     required_fields: tuple[str, ...]
     optional_fields: tuple[str, ...] = field(default_factory=tuple)
+    field_aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 SEARCH_RESULTS_CONTRACT = ResultContract(
     contract_name="search-results",
     required_fields=("code", "name"),
     optional_fields=("pinyin", "quote_id", "classify"),
+    field_aliases={
+        "code": ("code", "symbol", "证券代码", "A股代码", "基金代码"),
+        "name": ("name", "cname", "证券简称", "A股简称", "基金简称"),
+        "pinyin": ("pinyin", "name"),
+        "quote_id": ("quote_id", "symbol", "code", "证券代码", "A股代码", "基金代码"),
+        "classify": ("classify", "基金类型"),
+    },
 )
 
 HISTORY_BARS_CONTRACT = ResultContract(
     contract_name="history-bars",
     required_fields=("date", "symbol", "open", "close", "high", "low"),
     optional_fields=("volume", "turnover", "amplitude", "change_pct", "change_amount", "turnover_rate"),
+    field_aliases={
+        "date": ("date", "日期", "时间"),
+        "symbol": ("symbol", "股票代码", "代码"),
+        "open": ("open", "开盘", "今开", "单位净值"),
+        "close": ("close", "收盘", "最新价", "单位净值"),
+        "high": ("high", "最高"),
+        "low": ("low", "最低"),
+        "volume": ("volume", "成交量"),
+        "turnover": ("turnover", "成交额"),
+        "amplitude": ("amplitude", "振幅"),
+        "change_pct": ("change_pct", "涨跌幅"),
+        "change_amount": ("change_amount", "涨跌额"),
+        "turnover_rate": ("turnover_rate", "换手率"),
+    },
 )
 
 
@@ -79,3 +101,20 @@ def build_standard_result(
         raw_payload=raw_payload,
         provider_fields=provider_fields or {},
     )
+
+
+def normalize_contract_mapping(
+    mapping: dict[str, Any],
+    contract: ResultContract,
+) -> dict[str, Any]:
+    """按契约别名表把 provider 原始字段归一化为标准字段。"""
+
+    normalized: dict[str, Any] = {}
+    target_fields = (*contract.required_fields, *contract.optional_fields)
+    for field_name in target_fields:
+        aliases = contract.field_aliases.get(field_name, (field_name,))
+        for alias in aliases:
+            if alias in mapping and mapping[alias] not in (None, ""):
+                normalized[field_name] = mapping[alias]
+                break
+    return normalized

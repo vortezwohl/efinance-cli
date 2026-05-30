@@ -22,6 +22,7 @@ from efinance_cli.contracts import (
     StandardizationError,
     build_standard_result,
     ensure_mapping_has_required_fields,
+    normalize_contract_mapping,
 )
 from efinance_cli.models import BackendName
 from efinance_cli.retry_utils import call_with_network_retry
@@ -54,6 +55,7 @@ class EfinanceSearchHandler(CapabilityHandler):
             rows = [item._asdict() for item in result]
         else:
             rows = [result._asdict()]
+        rows = [normalize_contract_mapping(row, SEARCH_RESULTS_CONTRACT) for row in rows]
         for row in rows:
             ensure_mapping_has_required_fields(row, SEARCH_RESULTS_CONTRACT)
         return build_standard_result(SEARCH_RESULTS_CONTRACT, rows, raw_payload=result)
@@ -249,10 +251,11 @@ class AkshareSearchHandler(CapabilityHandler):
         """仅在满足搜索契约核心字段时追加记录。"""
 
         try:
-            ensure_mapping_has_required_fields(item, SEARCH_RESULTS_CONTRACT)
+            normalized = normalize_contract_mapping(item, SEARCH_RESULTS_CONTRACT)
+            ensure_mapping_has_required_fields(normalized, SEARCH_RESULTS_CONTRACT)
         except StandardizationError:
             return
-        rows.append(item)
+        rows.append(normalized)
 
 
 class AkshareEquityPriceHistoryHandler(CapabilityHandler):
@@ -358,8 +361,11 @@ def _standardize_history_frame(
             "turnover_rate": _pick_first_present_value(row, ("换手率", "turnover_rate")),
         }
         item = {key: _normalize_scalar(value) for key, value in item.items() if value is not None}
-        ensure_mapping_has_required_fields(item, HISTORY_BARS_CONTRACT)
-        rows.append(item)
+        normalized = normalize_contract_mapping(item, HISTORY_BARS_CONTRACT)
+        if "symbol" not in normalized:
+            normalized["symbol"] = symbol
+        ensure_mapping_has_required_fields(normalized, HISTORY_BARS_CONTRACT)
+        rows.append(normalized)
     return rows
 
 

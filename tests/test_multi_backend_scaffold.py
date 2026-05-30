@@ -26,7 +26,12 @@ from efinance_cli.command_catalog import (
     get_shared_command_definition,
     list_shared_root_groups,
 )
-from efinance_cli.contracts import SEARCH_RESULTS_CONTRACT, StandardizationError
+from efinance_cli.contracts import (
+    HISTORY_BARS_CONTRACT,
+    SEARCH_RESULTS_CONTRACT,
+    StandardizationError,
+    normalize_contract_mapping,
+)
 from efinance_cli.enrichment.service import enrich_market_data
 from efinance_cli.facade import CommandFacade
 from efinance_cli.models import BackendName, RequestField, RequestSchema
@@ -444,6 +449,53 @@ class MultiBackendScaffoldTest(unittest.TestCase):
 
         with self.assertRaises(StandardizationError):
             ensure_mapping_has_required_fields({"name": "Only Name"}, SEARCH_RESULTS_CONTRACT)
+
+    def test_search_contract_aliases_normalize_provider_fields(self) -> None:
+        """搜索契约应能把 provider 原始字段归一化为标准字段。"""
+
+        raw = {
+            "symbol": "AAPL",
+            "cname": "苹果",
+            "基金类型": "US_stock",
+        }
+        normalized = normalize_contract_mapping(raw, SEARCH_RESULTS_CONTRACT)
+        print_observation("search contract normalized", normalized)
+        self.assertEqual(
+            normalized,
+            {
+                "code": "AAPL",
+                "name": "苹果",
+                "quote_id": "AAPL",
+                "classify": "US_stock",
+            },
+        )
+
+    def test_history_contract_aliases_normalize_provider_fields(self) -> None:
+        """历史契约应能把 provider 原始字段归一化为标准字段。"""
+
+        raw = {
+            "日期": "2026-05-28",
+            "股票代码": "000001",
+            "开盘": 10.0,
+            "收盘": 10.5,
+            "最高": 10.6,
+            "最低": 9.9,
+            "成交量": 1000,
+        }
+        normalized = normalize_contract_mapping(raw, HISTORY_BARS_CONTRACT)
+        print_observation("history contract normalized", normalized)
+        self.assertEqual(
+            normalized,
+            {
+                "date": "2026-05-28",
+                "symbol": "000001",
+                "open": 10.0,
+                "close": 10.5,
+                "high": 10.6,
+                "low": 9.9,
+                "volume": 1000,
+            },
+        )
 
 
 if __name__ == "__main__":

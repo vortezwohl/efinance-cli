@@ -30,7 +30,7 @@
 
 - [x] 5.1 为历史回补引入标准补充接口，替换 enrichment 对 `efinance.*.get_quote_history` 的直接依赖。
 - [x] 5.2 调整 observation，使其优先消费标准结果契约字段，而不是继续扩张 provider 原始字段别名。
-- [ ] 5.3 为首批共享 capability 建立 observation 与 enrichment 的契约级测试。
+- [x] 5.3 为首批共享 capability 建立 observation 与 enrichment 的契约级测试。
 - [ ] 5.4 明确并实现 provider 原始字段到标准字段的兼容下沉策略，避免兼容逻辑散落在 observation 中。
 
 ## 6. 首批共享能力迁移
