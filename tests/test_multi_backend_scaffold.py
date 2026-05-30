@@ -878,5 +878,53 @@ class MultiBackendScaffoldTest(unittest.TestCase):
         print_observation("optional providers", [item.value for item in optional])
         self.assertIn(BackendName.YFINANCE, optional)
 
+    def test_provider_get_handler_rejects_unknown_capability(self) -> None:
+        """provider 在未知 capability 上应明确失败。"""
+        provider = get_backend_provider(BackendName.EFINANCE)
+        with self.assertRaises(KeyError):
+            provider.get_handler("unknown.capability")
+
+    def test_history_payload_coercion_rejects_multi_symbol_dict(self) -> None:
+        """历史结果标准化应拒绝多标的 dict payload。"""
+        definition = get_shared_command_definition("equity.price.history")
+        selection = resolve_backend_selection(definition, BackendName.EFINANCE)
+        facade = CommandFacade()
+        payload = {
+            "000001": pd.DataFrame([{"date": "2026-05-28", "open": 10.0, "close": 10.5, "high": 10.6, "low": 9.9}]),
+            "000002": pd.DataFrame([{"date": "2026-05-28", "open": 20.0, "close": 20.5, "high": 20.6, "low": 19.9}]),
+        }
+        with patch("efinance.stock.get_quote_history", return_value=payload), self.assertRaises(StandardizationError):
+            facade.invoke(
+                definition,
+                selection,
+                {
+                    "symbol": "000001",
+                    "market": "A_stock",
+                    "start_date": "20260501",
+                    "end_date": "20260528",
+                    "period": "daily",
+                    "adjust": "qfq",
+                },
+            )
+
+    def test_extension_handler_standardization_rejects_missing_name(self) -> None:
+        """扩展命令标准化缺少核心字段时应显式失败。"""
+        provider = get_backend_provider(BackendName.AKSHARE)
+        handler = provider.get_handler("akshare.industry.boards")
+        frame = pd.DataFrame(
+            [
+                {"最新价": 1234.5, "涨跌幅": 2.3},
+            ]
+        )
+        mocked_akshare = type(
+            "MockAkshare",
+            (),
+            {
+                "stock_board_industry_name_em": staticmethod(lambda: frame),
+            },
+        )()
+        with patch("efinance_cli.backends.providers._load_akshare_module", return_value=mocked_akshare), self.assertRaises(StandardizationError):
+            handler.execute({})
+
 if __name__ == "__main__":
     unittest.main()
