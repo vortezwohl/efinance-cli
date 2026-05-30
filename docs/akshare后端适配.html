@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>efinance-cli 多后端能力架构设计：从 efinance CLI 到后端无关金融命令平台</title>
+    <style>
+      :root {
+        --bg: #f3f7fa;
+        --panel: rgba(255, 255, 255, 0.9);
+        --panel-strong: #eef4f8;
+        --text: #18212b;
+        --text-strong: #0f161d;
+        --muted: #445260;
+        --line: rgba(71, 96, 120, 0.22);
+        --line-strong: rgba(71, 96, 120, 0.34);
+        --accent: #2e6f97;
+        --accent-soft: rgba(46, 111, 151, 0.12);
+        --accent-strong: #16384f;
+        --ok: #1f6f54;
+        --warn: #8f5a16;
+        --danger: #8a2f33;
+        --code-bg: #e8f0f5;
+        --code-strong-bg: #182531;
+        --code-strong-text: #edf8ff;
+        --shadow: 0 22px 70px rgba(27, 48, 66, 0.1);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top right, rgba(46, 111, 151, 0.16), transparent 24%),
+          linear-gradient(180deg, #edf4f8 0%, var(--bg) 100%);
+        font-family: "Georgia", "Times New Roman", "Noto Serif SC", "Source Han Serif SC", serif;
+        line-height: 1.86;
+      }
+
+      a {
+        color: var(--accent);
+        text-decoration-color: rgba(46, 111, 151, 0.32);
+      }
+
+      a:hover {
+        text-decoration-color: rgba(46, 111, 151, 0.88);
+      }
+
+      code,
+      pre {
+        font-family: "Inconsolata", "Cascadia Code", "Consolas", monospace;
+      }
+
+      :not(pre) > code {
+        padding: 0.08rem 0.34rem;
+        background: var(--code-bg);
+        color: var(--accent-strong);
+      }
+
+      pre {
+        margin: 1rem 0 0;
+        padding: 1rem 1.1rem;
+        overflow-x: auto;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: var(--code-strong-bg);
+        color: var(--code-strong-text);
+      }
+
+      .essay {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding: 32px 18px 64px;
+      }
+
+      .hero,
+      .section {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(8px);
+      }
+
+      .hero {
+        position: relative;
+        padding: 34px 32px 30px;
+      }
+
+      .hero::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(69, 99, 125, 0.05) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(69, 99, 125, 0.05) 1px, transparent 1px);
+        background-size: 100% 1.65rem, 1.65rem 100%;
+        pointer-events: none;
+      }
+
+      .eyebrow {
+        position: relative;
+        z-index: 1;
+        margin: 0 0 0.9rem;
+        font-size: 0.8rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--muted);
+        font-family: "Roboto", "Microsoft YaHei", sans-serif;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4 {
+        margin: 0;
+        color: var(--text-strong);
+        line-height: 1.3;
+      }
+
+      h1 {
+        position: relative;
+        z-index: 1;
+        font-size: clamp(2rem, 4vw, 2.8rem);
+        letter-spacing: 0.01em;
+      }
+
+      h2 {
+        font-size: 1.72rem;
+        margin-bottom: 0.85rem;
+      }
+
+      h3 {
+        font-size: 1.2rem;
+        margin-bottom: 0.5rem;
+      }
+
+      p {
+        margin: 0.86rem 0;
+      }
+
+      ul,
+      ol {
+        margin: 0.8rem 0 0.8rem 1.28rem;
+        padding: 0;
+      }
+
+      li {
+        margin: 0.34rem 0;
+      }
+
+      .lead {
+        position: relative;
+        z-index: 1;
+        max-width: 58rem;
+        margin-top: 1rem;
+        color: var(--muted);
+        font-size: 1.03rem;
+      }
+
+      .hero-grid,
+      .card-grid,
+      .tri-grid {
+        display: grid;
+        gap: 14px;
+      }
+
+      .hero-grid {
+        position: relative;
+        z-index: 1;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        margin-top: 1.4rem;
+      }
+
+      .card-grid {
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        margin-top: 1rem;
+      }
+
+      .tri-grid {
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        margin-top: 1rem;
+      }
+
+      .meta-card,
+      .info-card,
+      .decision-card,
+      .sketch-card {
+        border: 1px solid var(--line);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 249, 252, 0.95));
+        padding: 1rem 1.05rem;
+      }
+
+      .meta-label {
+        display: block;
+        margin-bottom: 0.35rem;
+        color: var(--muted);
+        font-size: 0.8rem;
+        font-family: "Roboto", "Microsoft YaHei", sans-serif;
+      }
+
+      .meta-value {
+        font-size: 1rem;
+        font-weight: 700;
+      }
+
+      .badge-row {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 1.2rem;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0.38rem 0.76rem;
+        border: 1px solid var(--line);
+        background: #f8fbfd;
+        color: var(--accent-strong);
+        font-size: 0.82rem;
+        font-family: "Roboto", "Microsoft YaHei", sans-serif;
+      }
+
+      .badge.ok {
+        color: var(--ok);
+        border-color: rgba(31, 111, 84, 0.26);
+        background: rgba(31, 111, 84, 0.08);
+      }
+
+      .badge.warn {
+        color: var(--warn);
+        border-color: rgba(143, 90, 22, 0.24);
+        background: rgba(143, 90, 22, 0.08);
+      }
+
+      .section {
+        margin-top: 22px;
+        padding: 26px 28px;
+      }
+
+      .section + .section {
+        margin-top: 20px;
+      }
+
+      .kicker {
+        margin-bottom: 0.6rem;
+        color: var(--muted);
+        font-size: 0.8rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        font-family: "Roboto", "Microsoft YaHei", sans-serif;
+      }
+
+      .callout,
+      .note,
+      .risk,
+      .summary-box {
+        margin: 1rem 0;
+        padding: 0.95rem 1rem;
+        border-left: 3px solid var(--accent);
+        border-top: 1px solid var(--line);
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        background: linear-gradient(180deg, rgba(248, 251, 253, 0.92), rgba(238, 245, 249, 0.92));
+      }
+
+      .risk {
+        border-left-color: var(--warn);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 1rem;
+      }
+
+      th,
+      td {
+        padding: 0.82rem 0.86rem;
+        text-align: left;
+        vertical-align: top;
+        border: 1px solid var(--line);
+      }
+
+      th {
+        background: var(--panel-strong);
+      }
+
+      .diagram {
+        margin-top: 1rem;
+        padding: 1rem 1.05rem;
+        border: 1px solid var(--line);
+        background: #182531;
+        color: #edf8ff;
+      }
+
+      .object-sketch {
+        margin-top: 1rem;
+      }
+
+      .footer-note {
+        margin-top: 1.2rem;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      @media (max-width: 720px) {
+        .essay {
+          padding: 18px 12px 42px;
+        }
+
+        .hero,
+        .section {
+          padding: 20px 18px;
+        }
+
+        h1 {
+          font-size: 1.95rem;
+        }
+
+        h2 {
+          font-size: 1.48rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="essay">
+      <section class="hero">
+        <p class="eyebrow">Multi-Backend Architecture Design</p>
+        <h1>efinance-cli 多后端能力架构设计：从单一 efinance CLI 到后端无关金融命令平台</h1>
+        <p class="lead">
+          本文档用于指导 <code>efinance-cli</code> 从“围绕 <code>efinance</code> 上游函数组织命令”的单后端 CLI，
+          演进为“以能力、命令语义和结果契约为中心”的多后端金融命令平台。本文档不再以旧版本兼容为首要目标，
+          而是直接采用更干净的命令模型、后端模型与执行模型，为当前的 <code>efinance</code>、<code>akshare</code>，
+          以及未来可能接入的 <code>yfinance</code> 预留稳定扩展空间。
+        </p>
+        <div class="hero-grid">
+          <article class="meta-card">
+            <span class="meta-label">当前结论</span>
+            <span class="meta-value">应重建命令模型，而不是继续围绕 efinance 函数做兼容壳</span>
+          </article>
+          <article class="meta-card">
+            <span class="meta-label">核心变化点</span>
+            <span class="meta-value">后端会增加、能力不对齐、字段不对齐、专属命令长期存在</span>
+          </article>
+          <article class="meta-card">
+            <span class="meta-label">目标状态</span>
+            <span class="meta-value">共享语义层后端无关，扩展命令层允许 provider-specific 差异</span>
+          </article>
+          <article class="meta-card">
+            <span class="meta-label">设计参考</span>
+            <span class="meta-value"><a href="https://vortezwohl.github.io/software-engineering/2026/05/22/AI-Coding-%E6%97%B6%E4%BB%A3-%E7%90%86%E8%A7%A3%E8%AE%BE%E8%AE%A1%E6%A8%A1%E5%BC%8F%E5%8F%98%E5%BE%97%E6%9B%B4%E5%8A%A0%E9%87%8D%E8%A6%81.html">设计模式文章</a></span>
+          </article>
+        </div>
+        <div class="badge-row">
+          <span class="badge ok">旧版本兼容不是目标</span>
+          <span class="badge ok">共享命令层必须后端无关</span>
+          <span class="badge warn">不同后端能力不完全一致是正常前提</span>
+          <span class="badge ok">未来预留 yfinance 扩展空间</span>
+        </div>
+      </section>
+
+      <section class="section">
+        <p class="kicker">1. Design Contract</p>
+        <h2>设计定约</h2>
+        <div class="card-grid">
+          <article class="info-card">
+            <h3>Objective</h3>
+            <ul>
+              <li>建立后端无关的共享命令层。</li>
+              <li>允许 <code>efinance</code>、<code>akshare</code>、未来 <code>yfinance</code> 通过统一能力协议接入。</li>
+              <li>允许后端声明额外能力、额外命令与额外字段，而不是强行压平差异。</li>
+              <li>让 observation、enrichment、rendering 依赖结果契约，而不是依赖具体 provider。</li>
+            </ul>
+          </article>
+          <article class="info-card">
+            <h3>Non-goals</h3>
+            <ul>
+              <li>不追求所有后端输出完全同构。</li>
+              <li>不追求一开始覆盖当前全部命令与全部品类。</li>
+              <li>不追求首版做成插件市场或运行时热插拔系统。</li>
+              <li>不把 provider-specific 语义伪装成共享语义。</li>
+            </ul>
+          </article>
+          <article class="info-card">
+            <h3>Constraints</h3>
+            <ul>
+              <li>共享命令必须稳定面向“能力语义”而不是“第三方函数名”。</li>
+              <li>命令参数模型不能继续绑定上游函数签名。</li>
+              <li>能力缺失必须显式暴露，而不是静默降级成错误语义。</li>
+              <li>所有新结构必须可测试、可枚举、可落到 contract test。</li>
+            </ul>
+          </article>
+        </div>
+        <div class="callout">
+          <strong>收束判断：</strong>
+          当前项目最稳妥的目标不是“给现有 efinance CLI 增加 akshare 支持”，而是“把 CLI 的稳定对象从上游函数切换为能力、命令语义和结果契约”。
+        </div>
+      </section>
+
+      <section class="section">
+        <p class="kicker">2. Current Diagnosis</p>
+        <h2>当前架构为什么不适合继续原地扩展</h2>
+        <p>
+          当前仓库已经有命令树、执行器、渲染、observation 与 enrichment 分层，但关键绑定点仍然是
+          <code>efinance</code> 函数。问题不只在“调用的是哪个后端”，还在“命令长什么样、参数怎么长出来、增强怎么回补”
+          都依赖同一个上游函数对象。
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>当前层</th>
+              <th>现状</th>
+              <th>为什么会卡住多后端</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>命令注册</td>
+              <td>以 <code>ALLOWED_FUNCTIONS + CLI_PATH_OVERRIDES</code> 管理上游函数白名单</td>
+              <td>稳定对象仍是 <code>efinance.xxx.yyy</code>，不是能力语义</td>
+            </tr>
+            <tr>
+              <td>参数生成</td>
+              <td>Click 参数由 callback 签名反射生成</td>
+              <td>CLI 参数模型直接绑定上游函数签名，无法让共享命令独立演化</td>
+            </tr>
+            <tr>
+              <td>执行调用</td>
+              <td>执行器直接调用 <code>request.spec.callback(**kwargs)</code></td>
+              <td>Facade 层尚未形成，调用目标仍是第三方函数对象</td>
+            </tr>
+            <tr>
+              <td>enrichment</td>
+              <td>历史回补直接调用 <code>efinance.*.get_quote_history</code></td>
+              <td>即使主命令切后端，增强链也可能悄悄回退到 efinance</td>
+            </tr>
+            <tr>
+              <td>observation</td>
+              <td>依赖模块名、原始字段别名和历史回补函数</td>
+              <td>未真正退化为“只消费标准结果契约”</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="risk">
+          <strong>关键结论：</strong>
+          现状不适合继续沿着“旧命令 + <code>--backend</code> + 两个适配器”的方式渐进扩展。因为最大的耦合不只在调用层，还在参数层和结果增强层。
+        </div>
+      </section>
+
+      <section class="section">
+        <p class="kicker">3. Architectural Position</p>
+        <h2>新版架构立场</h2>
+        <div class="tri-grid">
+          <article class="decision-card">
+            <h3>共享语义必须后端无关</h3>
+            <p>例如 <code>equity price history</code>、<code>fund nav history</code>、<code>instrument search</code> 这类命令，应首先表达业务语义，而不是表达来源库。</p>
+          </article>
+          <article class="decision-card">
+            <h3>能力差异必须显式存在</h3>
+            <p>不是每个后端都能返回相同数据，也不是每个后端都支持同一能力。共享层不能伪装不存在的能力。</p>
+          </article>
+          <article class="decision-card">
+            <h3>扩展命令必须合法共存</h3>
+            <p><code>akshare macro</code>、未来 <code>yfinance option</code> 这类 provider-specific 能力应进入扩展命令树，而不是污染共享命令树。</p>
+          </article>
+        </div>
+        <div class="summary-box">
+          <strong>最终目标形态：</strong>
+          <code>efinance-cli</code> 不再只是“自然化的 efinance CLI”，而是“以金融数据能力为中心的多后端 CLI 平台”。<code>efinance</code>、<code>akshare</code>、<code>yfinance</code> 都只是 provider。
+        </div>
+      </section>
+
+      <section class="section">
+        <p class="kicker">4. Patterns</p>
+        <h2>设计模式在本项目中的精确用法</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>模式</th>
+              <th>落点</th>
+              <th>用途</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Adapter</td>
+              <td>每个 provider 的 capability handler</td>
+              <td>把 <code>efinance</code> / <code>akshare</code> / <code>yfinance</code> 的真实 API 翻译成统一请求与结果契约</td>
+            </tr>
+            <tr>
+              <td>Strategy</td>
+              <td>capability route</td>
+              <td>同一共享命令在运行时按 backend 选择不同 handler，而不是在命令内部写条件分支</td>
+            </tr>
+            <tr>
+              <td>Facade</td>
+              <td>command facade</td>
+              <td>CLI 只面对一个高层入口，不直接接触 provider 与标准化细节</td>
+            </tr>
+            <tr>
+              <td>Factory Method</td>
+              <td>backend provider / handler 创建</td>
+              <td>调用方不负责实例化具体适配器</td>
+            </tr>
+            <tr>
+              <td>Proxy</td>
+              <td>能力检查、限流、缓存、重试、fallback</td>
+              <td>把访问控制逻辑放在调用边界，而不是散落在命令处理里</td>
+            </tr>
+            <tr>
+              <td>Decorator</td>
+              <td>schema validation、raw capture、tracing、metrics</td>
+              <td>在不改 handler 接口的前提下叠加横切行为</td>
+            </tr>
+            <tr>
+              <td>Template Method</td>
+              <td>统一执行骨架</td>
+              <td>固定“校验 -> 路由 -> 调用 -> 标准化 -> enrich -> observe -> render”链路</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="section">
+        <p class="kicker">5. Target Structure</p>
+        <h2>目标结构草图</h2>
+        <p>下面的草图不是实现细节，而是项目新的稳定骨架。</p>
+        <pre class="diagram"><code>CLI / TUI
+  -> Command Catalog
+  -> Request Schema / Validation
+  -> Command Facade
+  -> Capability Router
+  -> Backend Provider
+  -> Capability Handler Adapter
+  -> Result Contract / Standardization
+  -> Enrichment / Observation / Rendering
+
+共享稳定对象:
+  - capability_id
+  - request schema
+  - result contract
+  - execution pipeline
+
+不再作为稳定对象的内容:
+  - efinance.stock.get_quote_history
+  - akshare.stock_zh_a_hist
+  - yfinance.Ticker.history</code></pre>
+        <div class="note">
+          <strong>设计边界：</strong>
+          共享命令层只关心“我要哪种能力”，provider 层才关心“具体调哪个第三方函数”。这是本次重构最核心的边界切换。
+        </div>
+      </section>
+
+      <section class="section">
+        <p class="kicker">6. Command Model</p>
+        <h2>命令模型草图：共享命令树与扩展命令树并存</h2>
+        <div class="card-grid">
+          <article class="sketch-card">
+            <h3>共享命令树</h3>
+            <pre><code>equity price history
+equity price snapshot
+equity price live
+equity profile
+fund nav history
+fund profile
+instrument search</code></pre>
+            <p>共享命令树面向稳定业务语义。命令本身不暴露 provider 名称，但允许通过 <code>--backend</code> 选择具体来源。</p>
+          </article>
+          <article class="sketch-card">
+            <h3>provider-specific 扩展命令树</h3>
+            <pre><code>akshare macro cpi
+akshare industry board
+akshare option chain
+yfinance option chain
+yfinance earnings calendar</code></pre>
+            <p>扩展命令树面向后端独有能力，不伪装成共享命令，也不强迫其他后端实现。</p>
+          </article>
+        </div>
+        <div class="callout">
+          <strong>关键原则：</strong>
+          共享层负责“同类能力的稳定入口”，扩展层负责“释放 provider 独有价值”。两者都走同一执行骨架，但不共享错误语义。
+        </div>
+      </section>
+
+      <section class="section">
+        <p class="kicker">7. Object Sketch</p>
+        <h2>核心对象草图</h2>
+        <p>下面这组对象是建议的最小核心模型。重点不是字段名本身，而是职责边界。</p>
+        <pre class="object-sketch"><code>from dataclasses import dataclass, field
+from typing import Any, Protocol
+
+
+@dataclass(slots=True)
+class CommandDefinition:
+    command_id: str
+    cli_path: tuple[str, ...]
+    capability_id: str | None
+    request_schema: str
+    help_text: str
+    backend_scope: str  # shared | provider_specific
+    allowed_backends: set[str] = field(default_factory=set)
+    provider_name: str | None = None
+    supports_watch: bool = False
+
+
+@dataclass(slots=True)
+class CapabilityDescriptor:
+    capability_id: str
+    domain: str
+    result_contract: str
+    required_fields: tuple[str, ...]
+    optional_fields: tuple[str, ...] = ()
+
+
+@dataclass(slots=True)
+class BackendContext:
+    backend_name: str
+    raw_mode: bool = False
+    timeout_seconds: float | None = None
+
+
+@dataclass(slots=True)
+class CommandRequest:
+    command_id: str
+    capability_id: str | None
+    business_args: dict[str, Any]
+    output_args: dict[str, Any]
+    backend: BackendContext
+
+
+class CapabilityHandler(Protocol):
+    capability_id: str
+
+    def invoke(self, request: CommandRequest) -> Any:
+        ...
+
+
+class BackendProvider(Protocol):
+    name: str
+
+    def supports(self, capability_id: str) -> bool:
+        ...
+
+    def get_handler(self, capability_id: str) -> CapabilityHandler:
+        ...</code></pre>
+        <div class="summary-box">
+          <strong>这组对象解决的问题：</strong>
+          命令不再依赖上游函数签名；能力不再要求所有后端实现同一个胖接口；provider-specific 命令也可以在统一 request / render 骨架内合法存在。
+        </div>
+      </section>
+
+      <section class="section">
+        <p class="kicker">8. Result Contract</p>
+        <h2>结果契约草图：不是一张万能大表，而是一组 capability contract</h2>
+        <p>
+          当前 observation 与 enrichment 之所以难以解耦，是因为它们同时要理解模块名、原始字段别名和上游回补逻辑。
+          新方案中，不应追求“一个标准字段宇宙统一所有结果”，而应按能力定义契约。
+        </p>
+        <div class="tri-grid">
+          <article class="info-card">
+            <h3>HistoryBarContract</h3>
+            <ul>
+              <li>必需字段：<code>symbol</code>、<code>timestamp</code>、<code>open</code>、<code>high</code>、<code>low</code>、<code>close</code></li>
+              <li>可选字段：<code>volume</code>、<code>turnover</code>、<code>change_pct</code></li>
+              <li>适用能力：历史 K 线、部分 snapshot 回补</li>
+            </ul>
+          </article>
+          <article class="info-card">
+            <h3>RealtimeQuoteContract</h3>
+            <ul>
+              <li>必需字段：<code>symbol</code>、<code>name</code>、<code>last_price</code></li>
+              <li>可选字段：<code>open</code>、<code>high</code>、<code>low</code>、<code>volume</code></li>
+              <li>适用能力：实时列表、最新快照</li>
+            </ul>
+          </article>
+          <article class="info-card">
+            <h3>ProfileContract / SearchContract</h3>
+            <ul>
+              <li>必需字段更少，但允许原始字段通过 <code>extensions</code> 保留</li>
+              <li>避免为统一而过度裁剪后端独有信息</li>
+            </ul>
+          </article>
+        </div>
+        <div class="note">
+          <strong>重要边界：</strong>
+          结果标准化的目标不是保留所有原始字段，而是给共享后处理链提供稳定核心字段；provider 扩展字段可以通过 <code>extensions</code> 或 raw 视图保留。
+        </div>
+      </section>
+
+      <section class="section">
+        <p class="kicker">9. Execution Flow</p>
+        <h2>执行链路草图</h2>
+        <pre class="diagram"><code>1. CLI 解析命令路径
+2. Command Catalog 找到 CommandDefinition
+3. request schema 校验并构建 CommandRequest
+4. Capability Router 解析 backend
+5. backend.supports(capability_id) 做能力检查
+6. backend.get_handler(capability_id) 获取适配器
+7. handler.invoke(request) 调用上游
+8. result contract standardizer 标准化结果
+9. enrichment 只消费 contract，不再直接 import provider
+10. observation 只消费 contract / enriched result
+11. rendering 输出 raw / observation / csv / tsv / json
+12. watch 模式重复执行同一骨架</code></pre>
+        <div class="callout">
+          <strong>直接收益：</strong>
+          统一执行链会继续保留，但调用目标从“第三方函数”切换为“能力处理器”，这让双后端、多后端、provider-specific 命令都能进同一骨架。
+        </div>
+      </section>
+
+      <section class="section">
+        <p class="kicker">10. Backend Strategy</p>
+        <h2>面向未来 yfinance 的预留策略</h2>
+        <p>
+          未来接入 <code>yfinance</code> 时，最容易犯的错误是提前设计一个过胖的 <code>MarketBackend</code> 超大接口，
+          然后让每个 provider 填满一长串 <code>NotImplemented</code>。这会让接口失真，也会把 provider 差异压成噪音。
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>方案</th>
+              <th>短期感受</th>
+              <th>长期效果</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>胖接口后端对象</td>
+              <td>看起来统一</td>
+              <td>随着 <code>akshare</code> / <code>yfinance</code> 差异增大，会充满无意义空实现</td>
+            </tr>
+            <tr>
+              <td>capability handler registry</td>
+              <td>初期多一点样板</td>
+              <td>可以只为真实支持的能力注册 handler，更适合多后端长期演化</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="summary-box">
+          <strong>建议：</strong>
+          后端模型采用 <code>BackendProvider + CapabilityHandler</code>，而不是“一个实现全部方法的大对象”。这正是为未来 <code>yfinance</code> 预留可持续扩展空间。
+        </div>
+      </section>
+
+      <section class="section">
+        <p class="kicker">11. Migration</p>
+        <h2>实施顺序建议</h2>
+        <p>由于不再把旧版本兼容作为首要约束，实施顺序可以更果断，优先切断最深的耦合点。</p>
+        <ol>
+          <li>先重建 <code>CommandDefinition</code>、<code>CommandRequest</code> 与 request schema，不再让 CLI 参数从上游函数签名反射生成。</li>
+          <li>再建立 <code>CapabilityDescriptor</code>、<code>BackendProvider</code> 与 <code>CapabilityHandler</code> 骨架。</li>
+          <li>首批只落一组共享能力，例如 <code>equity.price.history</code>、<code>equity.profile</code>、<code>instrument.search</code>。</li>
+          <li>先接 <code>efinance</code> provider，证明新骨架可跑。</li>
+          <li>再接 <code>akshare</code> 同能力 handler，并补 contract test。</li>
+          <li>再改造 enrichment / observation，让它们从“看 provider”切换为“看 contract”。</li>
+          <li>最后增加 provider-specific 扩展命令树。</li>
+        </ol>
+        <div class="risk">
+          <strong>不建议的顺序：</strong>
+          不建议先在现有命令树上硬加 <code>--backend</code>，再去回头重写参数模型与能力模型。那样会让旧耦合延续更久，返工更大。
+        </div>
+      </section>
+
+      <section class="section">
+        <p class="kicker">12. Verification</p>
+        <h2>验证策略草图</h2>
+        <div class="card-grid">
+          <article class="info-card">
+            <h3>Schema Test</h3>
+            <p>验证每个共享命令的 request schema 是否能独立于 provider 存在，参数错误是否在路由前被拦截。</p>
+          </article>
+          <article class="info-card">
+            <h3>Contract Test</h3>
+            <p>对同一个 capability，验证不同 backend 的结果都满足对应 contract 的必需字段、类型和排序约束。</p>
+          </article>
+          <article class="info-card">
+            <h3>Capability Matrix Test</h3>
+            <p>验证支持矩阵、能力缺失报错、provider-specific 命令隔离与帮助页提示。</p>
+          </article>
+          <article class="info-card">
+            <h3>Pipeline Regression</h3>
+            <p>验证 raw / observation / csv / tsv / json、watch、enrichment 与 rendering 在双后端下继续走同一执行骨架。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <p class="kicker">13. Final Position</p>
+        <h2>最终建议</h2>
+        <div class="callout">
+          <strong>一句话总结：</strong>
+          本项目适合演进为“语义稳定、后端可替换、能力分层清晰、允许 provider-specific 扩展”的多后端金融 CLI，不适合继续围绕 <code>efinance</code> 函数做兼容式生长。
+        </div>
+        <ul>
+          <li>第一原则：共享命令层后端无关，provider 差异显式存在。</li>
+          <li>第二原则：命令、参数、结果都围绕 capability contract 组织，而不是围绕第三方函数组织。</li>
+          <li>第三原则：共享能力与扩展能力分树而治，但统一进入同一执行骨架。</li>
+          <li>第四原则：未来接入 <code>yfinance</code> 时，不扩胖接口，而是增加 handler 与 contract。</li>
+        </ul>
+        <p class="footer-note">
+          本文档为当前架构设计稿，重点在于重新定义稳定边界、能力模型与迁移方向，不把“未实现”表述为“已完成且可直接上线”。
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
