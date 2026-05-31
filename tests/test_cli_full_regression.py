@@ -132,6 +132,35 @@ class CliFullRegressionTest(unittest.TestCase):
         self.assertIn("仅支持 backend: akshare", result.output)
         self.assertIn("默认会路由到 'akshare'", result.output)
 
+    def test_watch_wrapper_keeps_provider_extension_default_routing(self) -> None:
+        captured: list[dict[str, object]] = []
+
+        def fake_run(self, request):  # noqa: ANN001
+            captured.append(
+                {
+                    "path": request.spec.cli_path,
+                    "command_key": request.command_definition.command_key,
+                    "backend": request.backend_selection.resolved.value,
+                    "watch_enabled": request.watch.enabled,
+                    "interval": request.watch.interval,
+                    "count": request.watch.count,
+                }
+            )
+
+        with patch("efinance_cli.executor.CommandExecutor.run", new=fake_run):
+            result = self.runner.invoke(
+                self.cli,
+                ["watch", "--interval", "3", "--count", "2", "stock", "industry", "boards"],
+            )
+
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        self.assertEqual(captured[0]["path"], ("stock", "industry", "boards"))
+        self.assertEqual(captured[0]["command_key"], "akshare.industry.boards")
+        self.assertEqual(captured[0]["backend"], "akshare")
+        self.assertEqual(captured[0]["watch_enabled"], True)
+        self.assertEqual(captured[0]["interval"], 3.0)
+        self.assertEqual(captured[0]["count"], 2)
+
     def test_required_schema_fields_fail_readably(self) -> None:
         result = self.runner.invoke(self.cli, ["stock", "price", "history"])
         self.assertNotEqual(result.exit_code, 0)

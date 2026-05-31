@@ -2,9 +2,9 @@
 
 该模块把仓库内维护的命令参考矩阵固化为运行时 command catalog。当前原则：
 
-- `stock` / `fund` / `bond` / `futures` 是正式资产域；
-- `quote` / `market` / `resolve` / `search` / `watch` 是 utility 入口；
-- 命令定义由显式元数据驱动，而不是由上游函数名动态反射。
+1. `shared` 只保留真正支持多 backend 的命令；
+2. 仅支持单一 backend 的命令必须下沉到对应 provider 的 extension 命令集合；
+3. 命令定义由显式元数据驱动，而不是由上游函数名动态反射。
 """
 
 from __future__ import annotations
@@ -64,6 +64,12 @@ def _supported_backends_for_command(command_path: str) -> tuple[BackendName, ...
     if command_path == "search":
         return (BackendName.EFINANCE, BackendName.AKSHARE)
     return (BackendName.EFINANCE,)
+
+
+def is_multi_backend_support(backends: tuple[BackendName, ...]) -> bool:
+    """判断一条命令是否具备真正的多 backend 支持。"""
+
+    return len(backends) >= 2
 
 
 def _result_contract_for_command(command_key: str, cli_path: tuple[str, ...]) -> str:
@@ -131,6 +137,7 @@ def _build_command_from_reference(entry: dict[str, Any]) -> CommandDefinition:
     command_path = str(entry["command_path"])
     command_key = _command_key_for_path(command_path)
     cli_path = _cli_path_for_path(command_path)
+    supported_backends = _supported_backends_for_command(command_path)
     return CommandDefinition(
         command_key=command_key,
         cli_path=cli_path,
@@ -140,10 +147,19 @@ def _build_command_from_reference(entry: dict[str, Any]) -> CommandDefinition:
             fields=tuple(_build_request_field(item) for item in entry.get("parameters", [])),
         ),
         help_text=str(entry.get("help_text", "")).strip(),
-        kind=CommandKind.SHARED,
-        supported_backends=_supported_backends_for_command(command_path),
+        kind=(
+            CommandKind.SHARED
+            if is_multi_backend_support(supported_backends)
+            else CommandKind.PROVIDER_EXTENSION
+        ),
+        supported_backends=supported_backends,
         allow_watch=bool(entry.get("watch_supported", True)),
         has_side_effect=bool(entry.get("has_side_effect", False)),
+        provider_name=(
+            None
+            if is_multi_backend_support(supported_backends)
+            else supported_backends[0]
+        ),
     )
 
 
@@ -199,7 +215,15 @@ SHARED_COMMANDS: tuple[CommandDefinition, ...] = (
         _build_command_from_reference(entry)
         for entry in _REFERENCE_CATALOG["commands"]
         if entry["command_path"] != "watch"
+        and is_multi_backend_support(_supported_backends_for_command(str(entry["command_path"])))
     ),
+)
+
+SINGLE_BACKEND_COMMANDS: tuple[CommandDefinition, ...] = tuple(
+    _build_command_from_reference(entry)
+    for entry in _REFERENCE_CATALOG["commands"]
+    if entry["command_path"] != "watch"
+    and not is_multi_backend_support(_supported_backends_for_command(str(entry["command_path"])))
 )
 
 COMMAND_BINDINGS: dict[str, dict[str, str | None]] = {
@@ -222,6 +246,15 @@ SHARED_CAPABILITIES: dict[str, CapabilityDescriptor] = {
         result_contract=_result_contract_for_command(command.command_key, command.cli_path),
     )
     for command in SHARED_COMMANDS
+}
+
+SINGLE_BACKEND_CAPABILITIES: dict[str, CapabilityDescriptor] = {
+    command.command_key: CapabilityDescriptor(
+        capability_name=command.capability,
+        description=command.help_text,
+        result_contract=_result_contract_for_command(command.command_key, command.cli_path),
+    )
+    for command in SINGLE_BACKEND_COMMANDS
 }
 
 
@@ -256,11 +289,41 @@ def get_shared_command_definition(command_key: str) -> CommandDefinition:
     raise KeyError(f"未知共享命令: {command_key}")
 
 
+def get_command_definition(command_key: str) -> CommandDefinition:
+    """按稳定命令键返回任意命令定义。"""
+
+    for command in SHARED_COMMANDS:
+        if command.command_key == command_key:
+            return command
+    for command in SINGLE_BACKEND_COMMANDS:
+        if command.command_key == command_key:
+            return command
+    raise KeyError(f"未知命令定义: {command_key}")
+
+
+def get_single_backend_command_definitions(
+    provider_name: BackendName | None = None,
+) -> tuple[CommandDefinition, ...]:
+    """返回单 backend 命令定义，可按 provider 过滤。"""
+
+    if provider_name is None:
+        return SINGLE_BACKEND_COMMANDS
+    return tuple(
+        command
+        for command in SINGLE_BACKEND_COMMANDS
+        if command.provider_name == provider_name
+    )
+
+
 def get_capability_descriptor(capability_name: str) -> CapabilityDescriptor:
     """返回 capability 描述。"""
 
     try:
         return SHARED_CAPABILITIES[capability_name]
+    except KeyError:
+        pass
+    try:
+        return SINGLE_BACKEND_CAPABILITIES[capability_name]
     except KeyError as exc:
         raise KeyError(f"未知 capability: {capability_name}") from exc
 

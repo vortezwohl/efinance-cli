@@ -10,7 +10,11 @@ import efinance
 import pandas as pd
 
 from efinance_cli.backends.base import BackendProvider, CapabilityHandler
-from efinance_cli.command_catalog import SHARED_COMMANDS, get_command_binding
+from efinance_cli.command_catalog import (
+    SHARED_COMMANDS,
+    get_command_binding,
+    get_single_backend_command_definitions,
+)
 from efinance_cli.contracts import (
     FUND_NAV_HISTORY_CONTRACT,
     HISTORY_BARS_CONTRACT,
@@ -889,9 +893,14 @@ def build_efinance_provider() -> BackendProvider:
         else:
             handlers[definition.capability] = EfinanceGenericHandler(definition.capability)
 
+    extension_commands = get_single_backend_command_definitions(BackendName.EFINANCE)
+    for definition in extension_commands:
+        handlers[definition.capability] = EfinanceGenericHandler(definition.capability)
+
     return BackendProvider(
         backend_name=BackendName.EFINANCE,
         handlers=handlers,
+        extension_commands=extension_commands,
     )
 
 

@@ -6,12 +6,32 @@ from unittest.mock import patch
 import pandas as pd
 
 from efinance_cli.backends.factory import get_backend_provider, list_backend_providers
-from efinance_cli.command_catalog import get_capability_descriptor, get_shared_command_definition
+from efinance_cli.command_catalog import (
+    SHARED_COMMANDS,
+    get_capability_descriptor,
+    get_command_definition,
+    get_shared_command_definition,
+    get_single_backend_command_definitions,
+)
 from efinance_cli.facade import CommandFacade
 from efinance_cli.models import BackendName, BackendSelection
 
 
 class MultiBackendScaffoldTest(unittest.TestCase):
+    def test_shared_catalog_only_contains_multi_backend_commands(self) -> None:
+        self.assertTrue(SHARED_COMMANDS)
+        for definition in SHARED_COMMANDS:
+            self.assertEqual(definition.kind.value, "shared")
+            self.assertGreaterEqual(len(definition.supported_backends), 2)
+
+    def test_single_backend_commands_are_provider_extensions(self) -> None:
+        definitions = get_single_backend_command_definitions()
+        self.assertTrue(definitions)
+        for definition in definitions:
+            self.assertEqual(definition.kind.value, "provider-extension")
+            self.assertEqual(len(definition.supported_backends), 1)
+            self.assertEqual(definition.provider_name, definition.supported_backends[0])
+
     def test_stock_capabilities_replace_equity_in_shared_catalog(self) -> None:
         history = get_shared_command_definition("stock.price.history")
         live = get_shared_command_definition("stock.price.live")
@@ -49,15 +69,6 @@ class MultiBackendScaffoldTest(unittest.TestCase):
             get_shared_command_definition("stock.price.live"),
             get_shared_command_definition("stock.profile"),
             get_shared_command_definition("fund.nav.history"),
-            get_shared_command_definition("bond.price.history"),
-            get_shared_command_definition("bond.price.live"),
-            get_shared_command_definition("bond.profile"),
-            get_shared_command_definition("futures.price.history"),
-            get_shared_command_definition("futures.price.live"),
-            get_shared_command_definition("quote.price.history"),
-            get_shared_command_definition("quote.price.latest"),
-            get_shared_command_definition("quote.profile"),
-            get_shared_command_definition("market.price.live"),
         ):
             self.assertEqual(
                 efinance_provider.supports(definition.command_key),
@@ -66,6 +77,16 @@ class MultiBackendScaffoldTest(unittest.TestCase):
             self.assertEqual(
                 akshare_provider.supports(definition.command_key),
                 BackendName.AKSHARE in definition.supported_backends,
+            )
+
+        for definition in get_single_backend_command_definitions():
+            self.assertEqual(
+                efinance_provider.supports(definition.command_key),
+                definition.provider_name == BackendName.EFINANCE,
+            )
+            self.assertEqual(
+                akshare_provider.supports(definition.command_key),
+                definition.provider_name == BackendName.AKSHARE,
             )
 
     def test_efinance_search_handler_returns_standard_result(self) -> None:
@@ -174,7 +195,7 @@ class MultiBackendScaffoldTest(unittest.TestCase):
                 ]
             ),
         }
-        definition = get_shared_command_definition("fund.nav.history-batch")
+        definition = get_command_definition("fund.nav.history-batch")
         facade = CommandFacade()
         with patch("efinance.fund.get_quote_history_multi", return_value=payload):
             result = facade.invoke(
@@ -199,7 +220,7 @@ class MultiBackendScaffoldTest(unittest.TestCase):
                 }
             ]
         )
-        definition = get_shared_command_definition("bond.price.history")
+        definition = get_command_definition("bond.price.history")
         facade = CommandFacade()
         with patch("efinance.bond.get_quote_history", return_value=frame):
             result = facade.invoke(
@@ -218,7 +239,7 @@ class MultiBackendScaffoldTest(unittest.TestCase):
 
     def test_efinance_quote_profile_handler_returns_standard_result(self) -> None:
         profile = pd.Series({"quote_id": "1.000001", "name": "平安银行", "market": "A_stock"})
-        definition = get_shared_command_definition("quote.profile")
+        definition = get_command_definition("quote.profile")
         facade = CommandFacade()
         with patch("efinance.common.get_base_info", return_value=profile):
             result = facade.invoke(
@@ -239,7 +260,7 @@ class MultiBackendScaffoldTest(unittest.TestCase):
                 }
             ]
         )
-        definition = get_shared_command_definition("quote.price.latest")
+        definition = get_command_definition("quote.price.latest")
         facade = CommandFacade()
         with patch("efinance.common.get_latest_quote", return_value=frame):
             result = facade.invoke(

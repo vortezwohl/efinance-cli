@@ -246,6 +246,8 @@ def build_shared_help_text(definition: CommandDefinition) -> str:
     supported = ", ".join(item.value for item in definition.supported_backends)
     lines.append(f"支持后端: {supported}")
     lines.append(f"命令类别: {definition.kind.value}")
+    if definition.provider_name is not None:
+        lines.append(f"所属 Provider: {definition.provider_name.value}")
     if definition.has_side_effect:
         lines.append("注意: 该命令具有副作用，执行后可能修改运行时状态或外部资源。")
     return "\n".join(lines)

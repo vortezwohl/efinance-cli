@@ -51,7 +51,7 @@ efinance
 
 ### 4.1 共享命令
 
-共享命令的目标是为相同业务能力提供稳定入口。当前版本已经把完整命令目录接入当前骨架，下面只列出几类代表性命令：
+共享命令的目标是为相同业务能力提供稳定入口。当前版本中，只有真实支持多个 backend 的命令才属于 shared。下面只列出当前仍在 shared catalog 中的代表性命令：
 
 | 命令键 | CLI 路径 | 说明 | 支持后端 |
 | --- | --- | --- | --- |
@@ -60,9 +60,6 @@ efinance
 | `stock.price.live` | `stock price live` | 股票实时行情列表 | `efinance`、`akshare` |
 | `stock.profile` | `stock profile` | 股票基础资料 | `efinance`、`akshare` |
 | `fund.nav.history` | `fund nav history` | 基金净值历史 | `efinance`、`akshare` |
-| `bond.catalog` | `bond catalog` | 债券目录 | `efinance` |
-| `futures.price.live` | `futures price live` | 期货实时行情列表 | `efinance` |
-| `quote.price.latest` | `quote price latest` | 基于 `quote_id` 的统一最新行情入口 | `efinance` |
 
 共享命令的共同特征：
 
@@ -73,16 +70,19 @@ efinance
 
 ### 4.2 Provider 扩展命令
 
-provider 扩展命令用于保留特定后端独有能力。当前已经落地的示例是：
+provider 扩展命令用于保留特定后端独有能力。只要某个命令当前只支持单一 backend，它在内部就必须被归类为 provider-extension，即使它仍挂在 `bond`、`quote`、`market`、`resolve` 这类业务语义路径下。当前已经落地的示例包括：
 
 ```bash
+efinance bond catalog
+efinance quote price latest --quote-ids 1.000001
+efinance search local --query 贵州茅台
 efinance stock industry boards
 ```
 
-该命令表示：
+这类命令表示：
 
-- 命令语义属于 `akshare` 专属扩展；
-- 它不伪装成跨后端共享能力；
+- 单 backend 命令不会再伪装成 shared；
+- 命令会显式绑定所属 provider；
 - 命令路径位于业务语义树中，而不是位于 provider 根组下；
 - 仍然复用统一执行骨架与结果契约；
 - 错误地显式指定其它 backend 时，会明确失败，而不是静默降级。
@@ -158,8 +158,9 @@ efinance stock industry boards --backend akshare
 ```bash
 efinance search --query 贵州茅台
 efinance search --query 腾讯 --backend akshare --format json
-efinance search local --query 贵州茅台
 ```
+
+`search local` 仍可继续使用，但它属于 `efinance` 单 backend 的 provider-extension，而不是共享搜索命令面的一部分。
 
 ### 7.2 股票、债券与期货行情
 
@@ -187,6 +188,9 @@ efinance resolve quote-id --symbol 000001
 ### 7.4 Provider 扩展能力
 
 ```bash
+efinance bond catalog
+efinance quote price latest --quote-ids 1.000001
+efinance search local --query 贵州茅台
 efinance stock industry boards
 ```
 
