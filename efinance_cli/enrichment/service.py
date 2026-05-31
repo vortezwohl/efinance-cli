@@ -18,15 +18,45 @@ from efinance_cli.models import InvocationRequest
 
 
 SHARED_HISTORY_COMMAND_KEYS: set[str] = {
-    "equity.price.history",
+    "stock.price.history",
+    "bond.price.history",
+    "futures.price.history",
+    "quote.price.history",
+    "fund.nav.history",
+    "fund.nav.history-batch",
 }
 
 SHARED_SINGLE_ROW_COMMAND_KEYS: set[str] = {
-    "equity.profile",
+    "stock.profile",
+    "fund.profile",
+    "bond.profile",
+    "quote.profile",
 }
 
 SHARED_REALTIME_LIST_COMMAND_KEYS: set[str] = {
-    "equity.price.live",
+    "stock.price.live",
+    "stock.price.latest",
+    "stock.price.snapshot",
+    "bond.price.live",
+    "futures.price.live",
+    "quote.price.latest",
+    "market.price.live",
+}
+
+PROFILE_HISTORY_COMMAND_MAP: dict[str, str] = {
+    "stock.profile": "stock.price.history",
+    "fund.profile": "fund.nav.history",
+    "bond.profile": "bond.price.history",
+    "quote.profile": "quote.price.history",
+}
+
+REALTIME_HISTORY_COMMAND_MAP: dict[str, str] = {
+    "stock.price.live": "stock.price.history",
+    "stock.price.latest": "stock.price.history",
+    "stock.price.snapshot": "stock.price.history",
+    "bond.price.live": "bond.price.history",
+    "futures.price.live": "futures.price.history",
+    "quote.price.latest": "quote.price.history",
 }
 
 
@@ -121,7 +151,8 @@ def fetch_standard_history_for_request(
     """通过标准补充接口回补共享 capability 的历史结果。"""
 
     command_key = resolve_runtime_command_key(request)
-    if command_key not in {"equity.price.history", "equity.profile", "equity.price.live"}:
+    history_command_key = resolve_history_lookup_command_key(command_key)
+    if history_command_key is None:
         return None
     if request.backend_selection is None:
         return None
@@ -133,17 +164,10 @@ def fetch_standard_history_for_request(
     facade = CommandFacade()
     history_definition = (
         request.command_definition
-        if command_key == "equity.price.history" and request.command_definition is not None
-        else get_shared_command_definition("equity.price.history")
+        if command_key == history_command_key and request.command_definition is not None
+        else get_shared_command_definition(history_command_key)
     )
-    request_data = {
-        "symbol": code,
-        "market": request.kwargs.get("market"),
-        "start_date": request.kwargs.get("start_date", "19000101"),
-        "end_date": request.kwargs.get("end_date", "20500101"),
-        "period": request.kwargs.get("period", "daily"),
-        "adjust": request.kwargs.get("adjust", "qfq"),
-    }
+    request_data = build_history_lookup_request_data(request, history_command_key, code)
     try:
         standard_result = facade.invoke(
             history_definition,
@@ -154,14 +178,88 @@ def fetch_standard_history_for_request(
         return None
 
     data = getattr(standard_result, "data", None)
-    if not isinstance(data, list):
+    frame = materialize_history_lookup_frame(data, code)
+    if frame is None:
         return None
-    frame = pd.DataFrame(data)
     if frame.empty:
         return frame
     if "symbol" in frame.columns:
         frame = frame[frame["symbol"].astype(str) == str(code)]
     return frame.tail(config.history_window).reset_index(drop=True)
+
+
+def resolve_history_lookup_command_key(command_key: str | None) -> str | None:
+    """把当前命令归并到对应的历史回补主链。"""
+
+    if command_key in SHARED_HISTORY_COMMAND_KEYS:
+        return command_key
+    if command_key in PROFILE_HISTORY_COMMAND_MAP:
+        return PROFILE_HISTORY_COMMAND_MAP[command_key]
+    if command_key in REALTIME_HISTORY_COMMAND_MAP:
+        return REALTIME_HISTORY_COMMAND_MAP[command_key]
+    return None
+
+
+def build_history_lookup_request_data(
+    request: InvocationRequest,
+    history_command_key: str,
+    code: str,
+) -> dict[str, object]:
+    """为不同资产历史主链构造最小回补请求。"""
+
+    common_history_fields = {
+        "beg": request.kwargs.get("beg", "19000101"),
+        "end": request.kwargs.get("end", "20500101"),
+        "klt": request.kwargs.get("klt", 101),
+        "fqt": request.kwargs.get("fqt", 1),
+        "suppress_error": request.kwargs.get("suppress_error", False),
+        "use_id_cache": request.kwargs.get("use_id_cache", True),
+    }
+    if history_command_key == "stock.price.history":
+        return {
+            "stock_codes": [code],
+            "market_type": request.kwargs.get("market_type"),
+            **common_history_fields,
+        }
+    if history_command_key == "bond.price.history":
+        return {
+            "bond_codes": [code],
+            **common_history_fields,
+        }
+    if history_command_key == "futures.price.history":
+        return {
+            "quote_ids": [code],
+            **common_history_fields,
+        }
+    if history_command_key == "quote.price.history":
+        return {
+            "codes": [code],
+            **common_history_fields,
+        }
+    if history_command_key == "fund.nav.history":
+        return {
+            "fund_code": code,
+            "pz": request.kwargs.get("pz", 40000),
+        }
+    raise KeyError(f"Unsupported history lookup command: {history_command_key}")
+
+
+def materialize_history_lookup_frame(
+    data: object,
+    code: str,
+) -> pd.DataFrame | None:
+    """把标准历史结果恢复成用于指标补充的 DataFrame。"""
+
+    if isinstance(data, list):
+        return pd.DataFrame(data)
+    if isinstance(data, dict):
+        if code in data and isinstance(data[code], list):
+            return pd.DataFrame(data[code])
+        if len(data) == 1:
+            only_value = next(iter(data.values()))
+            if isinstance(only_value, list):
+                return pd.DataFrame(only_value)
+    return None
 
 
 def resolve_runtime_command_key(request: InvocationRequest) -> str | None:

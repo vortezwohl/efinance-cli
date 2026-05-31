@@ -30,32 +30,39 @@
 efinance
 ├── search
 ├── watch
-├── instrument
-├── equity
+├── stock
 ├── fund
-└── akshare
+├── bond
+├── futures
+├── quote
+├── market
+└── resolve
 ```
 
 说明：
 
 - `search` 是共享命令 `instrument.search` 的顶层快捷入口；
-- `instrument`、`equity`、`fund` 挂载共享命令；
-- `akshare` 是 provider 扩展命令根组，用于承载 `akshare` 特有能力；
+- `stock`、`fund`、`bond`、`futures` 是正式资产域；
+- `quote`、`market`、`resolve` 是 utility 入口；
+- provider 扩展命令会挂入业务语义命令树，而不是额外暴露 provider 根组；
 - `watch` 是统一的循环刷新包装命令，会复用同一条请求解析与执行链路。
 
 ## 4. 共享命令与 Provider 扩展命令
 
 ### 4.1 共享命令
 
-共享命令的目标是为相同业务能力提供稳定入口。当前已经落地的共享命令如下：
+共享命令的目标是为相同业务能力提供稳定入口。当前版本已经把完整命令目录接入当前骨架，下面只列出几类代表性命令：
 
 | 命令键 | CLI 路径 | 说明 | 支持后端 |
 | --- | --- | --- | --- |
-| `instrument.search` | `search` / `instrument search` | 搜索证券候选项 | `efinance`、`akshare` |
-| `equity.price.history` | `equity price history` | 权益类历史行情 | `efinance`、`akshare` |
-| `equity.price.live` | `equity price live` | 权益类实时行情列表 | `efinance`、`akshare` |
-| `equity.profile` | `equity profile` | 权益类基础资料 | `efinance`、`akshare` |
+| `instrument.search` | `search` | 搜索证券候选项 | `efinance`、`akshare` |
+| `stock.price.history` | `stock price history` | 股票历史行情 | `efinance`、`akshare` |
+| `stock.price.live` | `stock price live` | 股票实时行情列表 | `efinance`、`akshare` |
+| `stock.profile` | `stock profile` | 股票基础资料 | `efinance`、`akshare` |
 | `fund.nav.history` | `fund nav history` | 基金净值历史 | `efinance`、`akshare` |
+| `bond.catalog` | `bond catalog` | 债券目录 | `efinance` |
+| `futures.price.live` | `futures price live` | 期货实时行情列表 | `efinance` |
+| `quote.price.latest` | `quote price latest` | 基于 `quote_id` 的统一最新行情入口 | `efinance` |
 
 共享命令的共同特征：
 
@@ -69,13 +76,14 @@ efinance
 provider 扩展命令用于保留特定后端独有能力。当前已经落地的示例是：
 
 ```bash
-efinance akshare industry boards
+efinance stock industry boards
 ```
 
 该命令表示：
 
 - 命令语义属于 `akshare` 专属扩展；
 - 它不伪装成跨后端共享能力；
+- 命令路径位于业务语义树中，而不是位于 provider 根组下；
 - 仍然复用统一执行骨架与结果契约；
 - 错误地显式指定其它 backend 时，会明确失败，而不是静默降级。
 
@@ -90,8 +98,8 @@ efinance akshare industry boards
 共享命令支持显式传入 `--backend`：
 
 ```bash
-efinance equity price history --symbol 600519 --backend efinance
-efinance equity price history --symbol 600519 --backend akshare
+efinance stock price history --symbols 600519 --backend efinance
+efinance stock price history --symbols 600519 --backend akshare
 efinance fund nav history --symbol 161725 --backend akshare
 ```
 
@@ -106,15 +114,15 @@ efinance fund nav history --symbol 161725 --backend akshare
 provider 扩展命令也接受 `--backend`，但其默认行为不同：
 
 ```bash
-efinance akshare industry boards
-efinance akshare industry boards --backend akshare
+efinance stock industry boards
+efinance stock industry boards --backend akshare
 ```
 
 规则如下：
 
 - 不传 `--backend` 时，默认解析到所属 provider；
 - 显式传入相同 provider 允许执行；
-- 显式传入其它 provider 会明确失败。
+- 显式传入其它 provider 会明确失败，并提示该命令默认会路由到所属 provider。
 
 ## 6. 统一运行时参数
 
@@ -149,31 +157,37 @@ efinance akshare industry boards --backend akshare
 
 ```bash
 efinance search --query 贵州茅台
-efinance instrument search --query 腾讯 --backend akshare --format json
+efinance search --query 腾讯 --backend akshare --format json
+efinance search local --query 贵州茅台
 ```
 
-### 7.2 权益类历史与实时
+### 7.2 股票、债券与期货行情
 
 ```bash
-efinance equity price history --symbol 600519 --start-date 20250101 --end-date 20250501
-efinance equity price history --symbol 600519 --backend akshare --view raw --format json
-efinance equity price live --backend efinance --record-limit 20
-efinance watch --interval 3 equity price live --backend akshare --record-limit 10
+efinance stock price history --symbols 600519 --start-date 20250101 --end-date 20250501
+efinance stock price history --symbols 600519 --backend akshare --view raw --format json
+efinance stock price live
+efinance bond price history --symbols 113519
+efinance futures price live
+efinance watch --interval 3 stock price live --backend akshare
 ```
 
-### 7.3 权益类资料与基金净值
+### 7.3 股票资料、基金净值与 utility 入口
 
 ```bash
-efinance equity profile --symbol 000001
-efinance equity profile --symbol 000001 --backend akshare --view raw
+efinance stock profile --symbols 000001
+efinance stock profile --symbols 000001 --backend akshare --view raw
 efinance fund nav history --symbol 161725
 efinance fund nav history --symbol 161725 --backend akshare --format json
+efinance quote price latest --quote-ids 1.000001
+efinance market price live --market m:105+t:3
+efinance resolve quote-id --symbol 000001
 ```
 
 ### 7.4 Provider 扩展能力
 
 ```bash
-efinance akshare industry boards
+efinance stock industry boards
 ```
 
 ## 8. BREAKING 变化
@@ -183,8 +197,34 @@ efinance akshare industry boards
 1. 命令稳定对象已经从“第三方函数”转为“命令键 + capability + request schema”。
 2. 共享命令的参数定义不再承诺与上游 provider 函数签名一一对应。
 3. 同一业务命令在不同后端下允许存在字段完整度差异，但会努力满足相同核心结果契约。
-4. provider 特有能力不再伪装成通用命令，而是挂到各自扩展命令根组。
+4. provider 特有能力不再伪装成通用命令，但也不再直接暴露 provider 顶层根组，而是挂到业务语义命令树。
 5. `--backend` 选择失败时会显式报错，不再依赖隐式兼容或静默回退。
+
+## 8.1 完整支持判定
+
+当前文档中的“支持某个 backend”不再等价于“命令能被路由到某个 handler”。判断一个命令是否已完整支持，必须同时满足：
+
+- 命令在 CLI 中可见，且请求参数能通过显式 schema 校验；
+- provider 侧存在真实 handler，并返回稳定标准结果契约；
+- 非 `raw` 输出会进入统一 enrichment / observation / rendering 主链；
+- 测试中的支持矩阵与运行时真实实现保持一致。
+
+### 8.2 当前关键支持矩阵
+
+下列关键命令已经进入一等运行时主链：
+
+| 命令键 | 说明 | 标准结果契约 | observation / enrichment |
+| --- | --- | --- | --- |
+| `stock.price.history` | 股票历史行情 | `history-bars` | 历史序列主链 |
+| `bond.price.history` | 债券历史行情 | `history-bars` | 历史序列主链 |
+| `futures.price.history` | 期货历史行情 | `history-bars` | 历史序列主链 |
+| `quote.price.history` | 通用行情历史 | `history-bars` | 历史序列主链 |
+| `fund.nav.history` | 基金净值历史 | `fund-nav-history` | 净值序列主链 |
+| `fund.nav.history-batch` | 基金批量净值历史 | `fund-nav-history` | 多 source 净值序列主链 |
+| `stock.profile` / `fund.profile` / `bond.profile` / `quote.profile` | 基础资料 | `profile-info` | 单标的回补主链 |
+| `stock.price.live` / `bond.price.live` / `futures.price.live` / `quote.price.latest` | 实时行情 | `realtime-quotes` | 多 source 回补主链 |
+
+仍未进入专用 observation 模板的记录类命令，例如 `flow` / `trades` / `catalog`，会继续使用受约束的 `provider-records` 契约和 generic observation 兜底，而不是无约束原始对象。
 
 ## 9. 当前边界
 

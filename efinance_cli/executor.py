@@ -114,6 +114,13 @@ class CommandExecutor:
         materialized = data
         if isinstance(data, list) and data and isinstance(data[0], dict):
             materialized = self._materialize_standard_rows(request, data)
+        elif isinstance(data, dict) and self._is_standard_row_mapping(data):
+            materialized = {
+                key: self._materialize_standard_rows(request, value)
+                for key, value in data.items()
+            }
+        elif isinstance(data, dict) and getattr(standard_result, "contract_name", None) == "profile-info":
+            materialized = pd.Series(data)
 
         if request.output.view_mode == "raw":
             return {
@@ -138,6 +145,20 @@ class CommandExecutor:
 
         _ = request
         return pd.DataFrame(rows)
+
+    def _is_standard_row_mapping(self, value: dict[str, Any]) -> bool:
+        """判断标准结果是否是 `source -> rows` 的批量记录映射。"""
+
+        if not value:
+            return True
+        for item in value.values():
+            if item == []:
+                continue
+            if not isinstance(item, list):
+                return False
+            if item and not isinstance(item[0], dict):
+                return False
+        return True
 
 
 def split_runtime_options(raw_kwargs: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:

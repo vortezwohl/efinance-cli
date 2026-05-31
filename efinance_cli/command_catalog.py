@@ -1,14 +1,17 @@
 """后端无关共享命令目录。
 
-该模块定义系统新的稳定命令对象。当前阶段已经落下两类代表性共享命令：
+该模块把仓库内维护的命令参考矩阵固化为运行时 command catalog。当前原则：
 
-- `instrument.search`：验证目录模型、schema 和支持矩阵；
-- `equity.price.history`：验证共享历史能力、双后端 handler 与结果契约。
-
-这样可以在不一次性迁移全部旧命令的前提下，逐步把新架构的主链闭环打通。
+- `stock` / `fund` / `bond` / `futures` 是正式资产域；
+- `quote` / `market` / `resolve` / `search` / `watch` 是 utility 入口；
+- 命令定义由显式元数据驱动，而不是由上游函数名动态反射。
 """
 
 from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
 
 from efinance_cli.models import (
     BackendName,
@@ -20,243 +23,218 @@ from efinance_cli.models import (
 )
 
 
+REFERENCE_CATALOG_PATH = (
+    Path(__file__).resolve().parent.parent
+    / ".skill"
+    / "efinance_cli"
+    / "references"
+    / "command-catalog.json"
+)
+
+_REFERENCE_CATALOG = json.loads(REFERENCE_CATALOG_PATH.read_text(encoding="utf-8"))
+
+MARKET_CHOICES: tuple[str, ...] = tuple(_REFERENCE_CATALOG["market_enums"])
+
 GROUP_HELP_TEXT: dict[str, str] = {
-    "fund": "���˻�����ֵ��ʷ�����������ϡ�",
-    "equity": "跨后端股票与权益类历史价格能力。",
-    "instrument": "跨后端的证券检索与标的解析能力。",
-    "watch": "为任意子命令开启循环刷新。",
+    name: str(payload.get("role", "")).strip() or f"{name} 命令分组。"
+    for name, payload in _REFERENCE_CATALOG["top_level_commands"].items()
+    if name not in {"search", "watch"}
+}
+GROUP_HELP_TEXT["watch"] = "为任意子命令开启循环刷新。"
+
+SPECIAL_ROOT_GROUPS = {"instrument", "search", "watch"}
+
+JSON_ANNOTATION_TO_TYPE: dict[str, Any] = {
+    "StringParamType": str,
+    "IntParamType": int,
+    "FloatParamType": float,
+    "BoolParamType": bool,
+    "Choice": str,
 }
 
 
-SHARED_CAPABILITIES: dict[str, CapabilityDescriptor] = {
-    "equity.price.live": CapabilityDescriptor(
-        capability_name="equity.price.live",
-        description="获取权益类标的的实时行情列表。",
-        result_contract="realtime-quotes",
+def _supported_backends_for_command(command_path: str) -> tuple[BackendName, ...]:
+    if command_path in {
+        "stock price history",
+        "stock price live",
+        "stock profile",
+        "fund nav history",
+    }:
+        return (BackendName.EFINANCE, BackendName.AKSHARE)
+    if command_path == "search":
+        return (BackendName.EFINANCE, BackendName.AKSHARE)
+    return (BackendName.EFINANCE,)
+
+
+def _result_contract_for_command(command_key: str, cli_path: tuple[str, ...]) -> str:
+    joined = ".".join(cli_path)
+    if command_key == "instrument.search" or command_key == "search.local":
+        return "search-results"
+    if joined.endswith("nav.history"):
+        return "fund-nav-history"
+    if joined.endswith("price.history"):
+        return "history-bars"
+    if joined.endswith("price.live") or joined.endswith("price.latest"):
+        return "realtime-quotes"
+    if joined.endswith("profile"):
+        return "profile-info"
+    if joined == "resolve.quote-id":
+        return "scalar-value"
+    if joined in {"fund.disclosure.dates"}:
+        return "scalar-list"
+    if joined in {"fund.reports.download", "market.add"}:
+        return "side-effect-status"
+    return "provider-records"
+
+
+def _build_request_field(parameter: dict[str, Any]) -> RequestField:
+    annotation_name = str(parameter.get("annotation", "StringParamType"))
+    annotation = JSON_ANNOTATION_TO_TYPE.get(annotation_name, str)
+    legal_values = parameter.get("legal_values")
+    choices = tuple(legal_values) if isinstance(legal_values, list) else ()
+    if str(parameter.get("name")) == "fs":
+        choices = ()
+    default = parameter.get("default")
+    if isinstance(default, bool):
+        annotation = bool
+    elif isinstance(default, int) and annotation is str:
+        annotation = int
+    elif isinstance(default, float) and annotation is str:
+        annotation = float
+    if parameter.get("multiple") and isinstance(default, list):
+        default = tuple(default)
+    return RequestField(
+        name=str(parameter["name"]),
+        cli_name=str(parameter["cli_name"]),
+        annotation=annotation,
+        required=bool(parameter.get("required", False)),
+        default=default,
+        help_text=str(parameter.get("description", "")).strip(),
+        choices=choices,
+        multiple=bool(parameter.get("multiple", False)),
+    )
+
+
+def _command_key_for_path(command_path: str) -> str:
+    if command_path == "search local":
+        return "search.local"
+    return command_path.replace(" ", ".")
+
+
+def _cli_path_for_path(command_path: str) -> tuple[str, ...]:
+    if command_path == "search local":
+        return ("search", "local")
+    return tuple(command_path.split())
+
+
+def _build_command_from_reference(entry: dict[str, Any]) -> CommandDefinition:
+    command_path = str(entry["command_path"])
+    command_key = _command_key_for_path(command_path)
+    cli_path = _cli_path_for_path(command_path)
+    return CommandDefinition(
+        command_key=command_key,
+        cli_path=cli_path,
+        capability=command_key,
+        request_schema=RequestSchema(
+            schema_name=f"{command_key.replace('.', '-')}-request",
+            fields=tuple(_build_request_field(item) for item in entry.get("parameters", [])),
+        ),
+        help_text=str(entry.get("help_text", "")).strip(),
+        kind=CommandKind.SHARED,
+        supported_backends=_supported_backends_for_command(command_path),
+        allow_watch=bool(entry.get("watch_supported", True)),
+        has_side_effect=bool(entry.get("has_side_effect", False)),
+    )
+
+
+DEFAULT_SEARCH_COMMAND = CommandDefinition(
+    command_key="instrument.search",
+    cli_path=("instrument", "search"),
+    capability="instrument.search",
+    request_schema=RequestSchema(
+        schema_name="instrument-search-request",
+        fields=(
+            RequestField(
+                name="keyword",
+                cli_name="query",
+                annotation=str,
+                required=True,
+                help_text="搜索关键字。",
+            ),
+            RequestField(
+                name="market_type",
+                cli_name="market",
+                annotation=str | None,
+                default=None,
+                choices=MARKET_CHOICES,
+                help_text="市场枚举名。",
+            ),
+            RequestField(
+                name="count",
+                cli_name="result-count",
+                annotation=int,
+                default=5,
+                help_text="返回候选数量。",
+            ),
+            RequestField(
+                name="use_local",
+                cli_name="use-local-cache",
+                annotation=bool,
+                default=True,
+                help_text="是否允许使用本地缓存。",
+            ),
+        ),
     ),
-    "fund.nav.history": CapabilityDescriptor(
-        capability_name="fund.nav.history",
-        description="��ȡ������ʷ��ֵ���ݡ�",
-        result_contract="fund-nav-history",
-    ),
-    "equity.profile": CapabilityDescriptor(
-        capability_name="equity.profile",
-        description="获取权益类标的的基础资料。",
-        result_contract="profile-info",
-    ),
-    "equity.price.history": CapabilityDescriptor(
-        capability_name="equity.price.history",
-        description="获取权益类标的历史 K 线数据。",
-        result_contract="history-bars",
-    ),
-    "instrument.search": CapabilityDescriptor(
-        capability_name="instrument.search",
-        description="按关键字搜索标的候选项。",
-        result_contract="search-results",
-    ),
-}
+    help_text="根据关键字搜索证券候选项。",
+    kind=CommandKind.SHARED,
+    supported_backends=(BackendName.EFINANCE, BackendName.AKSHARE),
+    allow_watch=True,
+    has_side_effect=False,
+)
 
 
 SHARED_COMMANDS: tuple[CommandDefinition, ...] = (
-    CommandDefinition(
-        command_key="equity.price.live",
-        cli_path=("equity", "price", "live"),
-        capability="equity.price.live",
-        request_schema=RequestSchema(
-            schema_name="equity-price-live-request",
-            fields=(
-                RequestField(
-                    name="market",
-                    cli_name="market",
-                    annotation=str | None,
-                    default="A_stock",
-                    choices=("A_stock",),
-                    help_text="市场枚举名；首版共享实时列表仅支持 A_stock。",
-                ),
-                RequestField(
-                    name="record_limit",
-                    cli_name="record-limit",
-                    annotation=int | None,
-                    default=None,
-                    help_text="仅保留前 N 条实时行情；不传时由 provider 返回默认规模。",
-                ),
-            ),
-        ),
-        help_text="获取权益类标的的实时行情列表。",
-        kind=CommandKind.SHARED,
-        supported_backends=(BackendName.EFINANCE, BackendName.AKSHARE),
-        allow_watch=True,
-        has_side_effect=False,
-    ),
-    CommandDefinition(
-        command_key="fund.nav.history",
-        cli_path=("fund", "nav", "history"),
-        capability="fund.nav.history",
-        request_schema=RequestSchema(
-            schema_name="fund-nav-history-request",
-            fields=(
-                RequestField(
-                    name="symbol",
-                    cli_name="symbol",
-                    annotation=str,
-                    required=True,
-                    help_text="������룬���� 161725��",
-                ),
-                RequestField(
-                    name="record_limit",
-                    cli_name="record-limit",
-                    annotation=int | None,
-                    default=None,
-                    help_text="��ȡ��� N ����ֵ��¼��������ʹ�� provider Ĭ�Ϸ�Χ��",
-                ),
-            ),
-        ),
-        help_text="��ȡ������ʷ��ֵ���ݡ�",
-        kind=CommandKind.SHARED,
-        supported_backends=(BackendName.EFINANCE, BackendName.AKSHARE),
-        allow_watch=True,
-        has_side_effect=False,
-    ),
-    CommandDefinition(
-        command_key="equity.profile",
-        cli_path=("equity", "profile"),
-        capability="equity.profile",
-        request_schema=RequestSchema(
-            schema_name="equity-profile-request",
-            fields=(
-                RequestField(
-                    name="symbol",
-                    cli_name="symbol",
-                    annotation=str,
-                    required=True,
-                    help_text="股票代码，例如 000001。",
-                ),
-                RequestField(
-                    name="market",
-                    cli_name="market",
-                    annotation=str | None,
-                    default="A_stock",
-                    choices=("A_stock", "Hongkong", "US_stock"),
-                    help_text="市场枚举名；当前首版共享资料能力默认按 A_stock 验证。",
-                ),
-            ),
-        ),
-        help_text="获取权益类标的的基础资料。",
-        kind=CommandKind.SHARED,
-        supported_backends=(BackendName.EFINANCE, BackendName.AKSHARE),
-        allow_watch=True,
-        has_side_effect=False,
-    ),
-    CommandDefinition(
-        command_key="equity.price.history",
-        cli_path=("equity", "price", "history"),
-        capability="equity.price.history",
-        request_schema=RequestSchema(
-            schema_name="equity-price-history-request",
-            fields=(
-                RequestField(
-                    name="symbol",
-                    cli_name="symbol",
-                    annotation=str,
-                    required=True,
-                    help_text="股票代码，例如 000001。",
-                ),
-                RequestField(
-                    name="market",
-                    cli_name="market",
-                    annotation=str | None,
-                    default=None,
-                    choices=("A_stock", "Hongkong", "US_stock"),
-                    help_text="市场枚举名；使用 akshare 时当前仅支持 A_stock。",
-                ),
-                RequestField(
-                    name="start_date",
-                    cli_name="start-date",
-                    annotation=str,
-                    default="19000101",
-                    help_text="开始日期，格式 YYYYMMDD。",
-                ),
-                RequestField(
-                    name="end_date",
-                    cli_name="end-date",
-                    annotation=str,
-                    default="20500101",
-                    help_text="结束日期，格式 YYYYMMDD。",
-                ),
-                RequestField(
-                    name="period",
-                    cli_name="period",
-                    annotation=str,
-                    default="daily",
-                    choices=("daily", "weekly", "monthly"),
-                    help_text="K 线周期。",
-                ),
-                RequestField(
-                    name="adjust",
-                    cli_name="adjust",
-                    annotation=str,
-                    default="qfq",
-                    choices=("qfq", "hfq", "none"),
-                    help_text="复权方式；none 表示不复权。",
-                ),
-            ),
-        ),
-        help_text="获取权益类标的历史 K 线数据。",
-        kind=CommandKind.SHARED,
-        supported_backends=(BackendName.EFINANCE, BackendName.AKSHARE),
-        allow_watch=True,
-        has_side_effect=False,
-    ),
-    CommandDefinition(
-        command_key="instrument.search",
-        cli_path=("instrument", "search"),
-        capability="instrument.search",
-        request_schema=RequestSchema(
-            schema_name="instrument-search-request",
-            fields=(
-                RequestField(
-                    name="query",
-                    cli_name="query",
-                    annotation=str,
-                    required=True,
-                    help_text="搜索关键字。",
-                ),
-                RequestField(
-                    name="market",
-                    cli_name="market",
-                    annotation=str | None,
-                    default=None,
-                    help_text="市场枚举名，例如 A_stock、Hongkong、US_stock。",
-                ),
-                RequestField(
-                    name="result_count",
-                    cli_name="result-count",
-                    annotation=int,
-                    default=5,
-                    help_text="返回候选数量。",
-                ),
-                RequestField(
-                    name="use_local_cache",
-                    cli_name="use-local-cache",
-                    annotation=bool,
-                    default=True,
-                    help_text="是否允许使用本地搜索缓存。",
-                ),
-            ),
-        ),
-        help_text="根据关键字搜索证券候选项。",
-        kind=CommandKind.SHARED,
-        supported_backends=(BackendName.EFINANCE, BackendName.AKSHARE),
-        allow_watch=True,
-        has_side_effect=False,
+    DEFAULT_SEARCH_COMMAND,
+    *tuple(
+        _build_command_from_reference(entry)
+        for entry in _REFERENCE_CATALOG["commands"]
+        if entry["command_path"] != "watch"
     ),
 )
+
+COMMAND_BINDINGS: dict[str, dict[str, str | None]] = {
+    DEFAULT_SEARCH_COMMAND.command_key: {"module": "utils", "function": "search_quote"},
+}
+for entry in _REFERENCE_CATALOG["commands"]:
+    command_path = str(entry["command_path"])
+    if command_path == "watch":
+        continue
+    COMMAND_BINDINGS[_command_key_for_path(command_path)] = {
+        "module": entry.get("module"),
+        "function": entry.get("function"),
+    }
+
+
+SHARED_CAPABILITIES: dict[str, CapabilityDescriptor] = {
+    command.command_key: CapabilityDescriptor(
+        capability_name=command.capability,
+        description=command.help_text,
+        result_contract=_result_contract_for_command(command.command_key, command.cli_path),
+    )
+    for command in SHARED_COMMANDS
+}
 
 
 def list_shared_root_groups() -> list[str]:
     """返回当前共享命令树的根分组。"""
 
-    roots = sorted({command.root_group for command in SHARED_COMMANDS})
+    roots = sorted(
+        {
+            command.root_group
+            for command in SHARED_COMMANDS
+            if command.root_group not in SPECIAL_ROOT_GROUPS
+        }
+    )
     return roots
 
 
@@ -285,3 +263,12 @@ def get_capability_descriptor(capability_name: str) -> CapabilityDescriptor:
         return SHARED_CAPABILITIES[capability_name]
     except KeyError as exc:
         raise KeyError(f"未知 capability: {capability_name}") from exc
+
+
+def get_command_binding(command_key: str) -> dict[str, str | None]:
+    """返回命令键绑定的上游来源信息。"""
+
+    try:
+        return COMMAND_BINDINGS[command_key]
+    except KeyError as exc:
+        raise KeyError(f"未知命令绑定: {command_key}") from exc

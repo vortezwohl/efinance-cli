@@ -1,28 +1,26 @@
-"""内建 provider 的骨架实现。
-
-当前模块先承载首批共享能力的双后端适配：
-
-- `instrument.search`
-- `equity.price.history`
-
-每个 handler 只负责单个 capability，把 provider 原始返回值收敛到共享结果契约。
-"""
+"""内建 provider 的实现。"""
 
 from __future__ import annotations
 
 import importlib
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 import efinance
 import pandas as pd
 
 from efinance_cli.backends.base import BackendProvider, CapabilityHandler
+from efinance_cli.command_catalog import SHARED_COMMANDS, get_command_binding
 from efinance_cli.contracts import (
     FUND_NAV_HISTORY_CONTRACT,
     HISTORY_BARS_CONTRACT,
     PROFILE_INFO_CONTRACT,
     PROVIDER_RECORDS_CONTRACT,
     REALTIME_QUOTES_CONTRACT,
+    SCALAR_LIST_CONTRACT,
+    SCALAR_VALUE_CONTRACT,
     SEARCH_RESULTS_CONTRACT,
+    SIDE_EFFECT_STATUS_CONTRACT,
     StandardizationError,
     build_standard_result,
     ensure_mapping_has_required_fields,
@@ -37,210 +35,88 @@ from efinance_cli.models import (
 from efinance_cli.retry_utils import call_with_network_retry
 
 
+PRICE_HISTORY_COMMAND_KEYS = {
+    "stock.price.history",
+    "bond.price.history",
+    "futures.price.history",
+    "quote.price.history",
+}
+
+PROFILE_COMMAND_KEYS = {
+    "stock.profile",
+    "fund.profile",
+    "bond.profile",
+    "quote.profile",
+}
+
+REALTIME_COMMAND_KEYS = {
+    "stock.price.live",
+    "stock.price.latest",
+    "stock.price.snapshot",
+    "bond.price.live",
+    "futures.price.live",
+    "quote.price.latest",
+    "market.price.live",
+}
+
+SIDE_EFFECT_COMMAND_KEYS = {
+    "fund.reports.download",
+    "market.add",
+}
+
+SCALAR_LIST_COMMAND_KEYS = {
+    "fund.disclosure.dates",
+}
+
+
 class EfinanceSearchHandler(CapabilityHandler):
-    """`efinance` 的搜索能力骨架实现。"""
+    """`efinance` 的默认搜索能力实现。"""
 
     capability_name = "instrument.search"
 
     def execute(self, request_data: dict[str, object]):
-        market_type = None
-        market_name = request_data.get("market")
-        if isinstance(market_name, str) and market_name:
-            market_type = getattr(efinance.utils.MarketType, market_name, None)
-            if market_type is None:
-                raise ValueError(f"Unknown market enum: {market_name}")
-
+        market_type = _get_request_value(request_data, "market_type", "market")
         result = call_with_network_retry(
             efinance.utils.search_quote,
-            keyword=request_data["query"],
-            market_type=market_type,
-            count=request_data["result_count"],
-            use_local=request_data["use_local_cache"],
+            keyword=_get_request_value(request_data, "keyword", "query"),
+            market_type=_resolve_efinance_market_type(market_type),
+            count=_get_request_value(request_data, "count", "result_count", default=5),
+            use_local=_get_request_value(request_data, "use_local", "use_local_cache", default=True),
         )
-        rows: list[dict[str, object]] = []
-        if result is None:
-            return build_standard_result(SEARCH_RESULTS_CONTRACT, rows, raw_payload=result)
-        if isinstance(result, list):
-            rows = [item._asdict() for item in result]
+        return _build_search_standard_result(result)
+
+
+class EfinanceGenericHandler(CapabilityHandler):
+    """按命令绑定动态调用 `efinance` 的通用 handler。"""
+
+    def __init__(self, capability_name: str) -> None:
+        self.capability_name = capability_name
+
+    def execute(self, request_data: dict[str, object]):
+        binding = get_command_binding(self.capability_name)
+        module_name = binding["module"]
+        function_name = binding["function"]
+        if module_name is None or function_name is None:
+            raise RuntimeError(f"命令 {self.capability_name} 缺少上游绑定")
+
+        callback = getattr(getattr(efinance, module_name), function_name)
+        if self.capability_name in SIDE_EFFECT_COMMAND_KEYS:
+            result = callback(**request_data)
         else:
-            rows = [result._asdict()]
-        rows = [normalize_contract_mapping(row, SEARCH_RESULTS_CONTRACT) for row in rows]
-        for row in rows:
-            ensure_mapping_has_required_fields(row, SEARCH_RESULTS_CONTRACT)
-        return build_standard_result(SEARCH_RESULTS_CONTRACT, rows, raw_payload=result)
-
-
-class EfinanceEquityPriceHistoryHandler(CapabilityHandler):
-    """`efinance` 的权益类历史行情能力实现。"""
-
-    capability_name = "equity.price.history"
-
-    def execute(self, request_data: dict[str, object]):
-        market_type = _resolve_efinance_market_type(request_data.get("market"))
-        period_map = {
-            "daily": 101,
-            "weekly": 102,
-            "monthly": 103,
-        }
-        adjust_map = {
-            "qfq": 1,
-            "hfq": 2,
-            "none": 0,
-        }
-        period = str(request_data["period"])
-        adjust = str(request_data["adjust"])
-        result = call_with_network_retry(
-            efinance.stock.get_quote_history,
-            request_data["symbol"],
-            beg=request_data["start_date"],
-            end=request_data["end_date"],
-            klt=period_map[period],
-            fqt=adjust_map[adjust],
-            market_type=market_type,
-        )
-        frame = _coerce_history_frame(result)
-        rows = _standardize_history_frame(
-            frame,
-            symbol=str(request_data["symbol"]),
-            provider_name=BackendName.EFINANCE.value,
-        )
-        return build_standard_result(
-            HISTORY_BARS_CONTRACT,
-            rows,
-            raw_payload=result,
-            metadata={
-                "symbol": request_data["symbol"],
-                "period": period,
-                "adjust": adjust,
-                "backend": BackendName.EFINANCE.value,
-            },
-        )
-
-
-class EfinanceEquityProfileHandler(CapabilityHandler):
-    """`efinance` 的权益类资料能力实现。"""
-
-    capability_name = "equity.profile"
-
-    def execute(self, request_data: dict[str, object]):
-        result = call_with_network_retry(
-            efinance.stock.get_base_info,
-            str(request_data["symbol"]),
-        )
-        row = _coerce_profile_row(result)
-        normalized = normalize_contract_mapping(row, PROFILE_INFO_CONTRACT)
-        if "code" not in normalized:
-            normalized["code"] = str(request_data["symbol"])
-        ensure_mapping_has_required_fields(normalized, PROFILE_INFO_CONTRACT)
-        return build_standard_result(
-            PROFILE_INFO_CONTRACT,
-            normalized,
-            raw_payload=result,
-            metadata={
-                "symbol": request_data["symbol"],
-                "market": request_data.get("market"),
-                "backend": BackendName.EFINANCE.value,
-            },
-        )
-
-
-class EfinanceFundNavHistoryHandler(CapabilityHandler):
-    """`efinance` 的基金净值历史能力实现。"""
-
-    capability_name = "fund.nav.history"
-
-    def execute(self, request_data: dict[str, object]):
-        result = call_with_network_retry(
-            efinance.fund.get_quote_history,
-            str(request_data["symbol"]),
-        )
-        frame = _coerce_history_frame(result)
-        rows = _standardize_fund_nav_history_frame(
-            frame,
-            symbol=str(request_data["symbol"]),
-        )
-        limit = request_data.get("record_limit")
-        if isinstance(limit, int) and limit > 0:
-            rows = rows[:limit]
-        return build_standard_result(
-            FUND_NAV_HISTORY_CONTRACT,
-            rows,
-            raw_payload=result,
-            metadata={
-                "symbol": request_data["symbol"],
-                "backend": BackendName.EFINANCE.value,
-            },
-        )
-
-
-class EfinanceEquityPriceLiveHandler(CapabilityHandler):
-    """`efinance` 的权益实时列表能力实现。"""
-
-    capability_name = "equity.price.live"
-
-    def execute(self, request_data: dict[str, object]):
-        market = request_data.get("market")
-        if market not in (None, "", "A_stock"):
-            raise ValueError("Efinance equity.price.live 当前仅支持 A_stock 市场")
-
-        result = call_with_network_retry(efinance.stock.get_realtime_quotes)
-        frame = _coerce_history_frame(result)
-        rows = _standardize_realtime_quotes_frame(
-            frame,
-            market_name="A_stock",
-            provider_name=BackendName.EFINANCE.value,
-        )
-        limit = request_data.get("record_limit")
-        if isinstance(limit, int) and limit > 0:
-            rows = rows[:limit]
-        return build_standard_result(
-            REALTIME_QUOTES_CONTRACT,
-            rows,
-            raw_payload=result,
-            metadata={
-                "market": "A_stock",
-                "backend": BackendName.EFINANCE.value,
-            },
-        )
-
-
-class UnsupportedSearchHandler(CapabilityHandler):
-    """表示 provider 骨架已注册，但能力尚未实现。"""
-
-    capability_name = "instrument.search"
-
-    def __init__(self, backend_name: BackendName) -> None:
-        self.backend_name = backend_name
-
-    def execute(self, request_data: dict[str, object]):
-        raise NotImplementedError(
-            f"Backend '{self.backend_name.value}' 的 capability '{self.capability_name}' 尚未实现"
-        )
+            result = call_with_network_retry(callback, **request_data)
+        return _standardize_efinance_result(self.capability_name, request_data, result)
 
 
 class AkshareSearchHandler(CapabilityHandler):
-    """`akshare` 的搜索能力实现。
-
-    当前实现优先聚合可独立调用的股票与基金名录接口：
-
-    - 上交所 A 股列表；
-    - 深交所 A 股列表；
-    - 天天基金基金名录；
-    - 美股名录（若 provider 环境可用）。
-
-    设计原则：
-    - 每个名录源独立加载，单路失败不拖垮整次搜索；
-    - 若全部来源都失败，则显式报错；
-    - 返回值仍收敛到共享搜索结果契约。
-    """
+    """`akshare` 的搜索能力实现。"""
 
     capability_name = "instrument.search"
 
     def execute(self, request_data: dict[str, object]):
         akshare = _load_akshare_module()
-        market = request_data.get("market")
-        query = str(request_data["query"]).strip()
-        result_count = int(request_data["result_count"])
+        market = _get_request_value(request_data, "market_type", "market")
+        query = str(_get_request_value(request_data, "keyword", "query")).strip()
+        result_count = int(_get_request_value(request_data, "count", "result_count", default=5))
 
         loaders = self._build_catalog_loaders(akshare, market)
         rows: list[dict[str, object]] = []
@@ -270,8 +146,6 @@ class AkshareSearchHandler(CapabilityHandler):
         )
 
     def _build_catalog_loaders(self, akshare: object, market: object) -> list[tuple[str, object]]:
-        """根据 market 约束构造名录加载器列表。"""
-
         loaders: list[tuple[str, object]] = []
         market_name = str(market) if market not in (None, "") else None
         if market_name in {None, "A_stock"}:
@@ -292,8 +166,6 @@ class AkshareSearchHandler(CapabilityHandler):
         frame: pd.DataFrame,
         classify: str,
     ) -> list[dict[str, object]]:
-        """把 akshare 名录 DataFrame 转为共享搜索结果结构。"""
-
         rows: list[dict[str, object]] = []
         if frame is None or frame.empty:
             return rows
@@ -344,8 +216,6 @@ class AkshareSearchHandler(CapabilityHandler):
         rows: list[dict[str, object]],
         item: dict[str, object],
     ) -> None:
-        """仅在满足搜索契约核心字段时追加记录。"""
-
         try:
             normalized = normalize_contract_mapping(item, SEARCH_RESULTS_CONTRACT)
             ensure_mapping_has_required_fields(normalized, SEARCH_RESULTS_CONTRACT)
@@ -354,111 +224,71 @@ class AkshareSearchHandler(CapabilityHandler):
         rows.append(normalized)
 
 
-class AkshareEquityPriceHistoryHandler(CapabilityHandler):
-    """`akshare` 的权益类历史行情能力实现。"""
-
-    capability_name = "equity.price.history"
+class AkshareStockPriceHistoryHandler(CapabilityHandler):
+    capability_name = "stock.price.history"
 
     def execute(self, request_data: dict[str, object]):
         akshare = _load_akshare_module()
-        market = request_data.get("market")
+        market = _get_request_value(request_data, "market_type", "market")
         if market not in (None, "", "A_stock"):
-            raise ValueError("Akshare equity.price.history 当前仅支持 A_stock 市场")
+            raise ValueError("Akshare stock.price.history 当前仅支持 A_stock 市场")
 
-        adjust = "" if request_data["adjust"] == "none" else str(request_data["adjust"])
+        symbols = _coerce_symbol_list(_get_request_value(request_data, "stock_codes", "symbol", default=[]))
+        if len(symbols) != 1:
+            raise ValueError("Akshare stock.price.history 当前仅支持单标的请求")
+
+        adjust_map = {0: "", 1: "qfq", 2: "hfq"}
+        period_map = {101: "daily", 102: "weekly", 103: "monthly"}
         frame = akshare.stock_zh_a_hist(
-            symbol=str(request_data["symbol"]),
-            period=str(request_data["period"]),
-            start_date=str(request_data["start_date"]),
-            end_date=str(request_data["end_date"]),
-            adjust=adjust,
+            symbol=symbols[0],
+            period=period_map[int(_get_request_value(request_data, "klt", "period", default=101))],
+            start_date=str(_get_request_value(request_data, "beg", "start_date", default="19000101")),
+            end_date=str(_get_request_value(request_data, "end", "end_date", default="20500101")),
+            adjust=adjust_map[int(_get_request_value(request_data, "fqt", "adjust", default=1))],
         )
         rows = _standardize_history_frame(
             frame,
-            symbol=str(request_data["symbol"]),
+            symbol=symbols[0],
             provider_name=BackendName.AKSHARE.value,
         )
         return build_standard_result(
             HISTORY_BARS_CONTRACT,
             rows,
             raw_payload=frame,
-            metadata={
-                "symbol": request_data["symbol"],
-                "period": request_data["period"],
-                "adjust": request_data["adjust"],
-                "backend": BackendName.AKSHARE.value,
-            },
+            metadata={"backend": BackendName.AKSHARE.value},
         )
 
 
-class AkshareEquityProfileHandler(CapabilityHandler):
-    """`akshare` 的权益类资料能力实现。"""
-
-    capability_name = "equity.profile"
+class AkshareStockProfileHandler(CapabilityHandler):
+    capability_name = "stock.profile"
 
     def execute(self, request_data: dict[str, object]):
-        market = request_data.get("market")
+        market = _get_request_value(request_data, "market_type", "market")
         if market not in (None, "", "A_stock"):
-            raise ValueError("Akshare equity.profile 当前仅支持 A_stock 市场")
+            raise ValueError("Akshare stock.profile 当前仅支持 A_stock 市场")
+
+        symbols = _coerce_symbol_list(_get_request_value(request_data, "stock_codes", "symbol", default=[]))
+        if len(symbols) != 1:
+            raise ValueError("Akshare stock.profile 当前仅支持单标的请求")
 
         akshare = _load_akshare_module()
-        result = akshare.stock_individual_info_em(symbol=str(request_data["symbol"]))
-        row = _coerce_profile_row(result)
-        normalized = normalize_contract_mapping(row, PROFILE_INFO_CONTRACT)
-        if "code" not in normalized:
-            normalized["code"] = str(request_data["symbol"])
-        ensure_mapping_has_required_fields(normalized, PROFILE_INFO_CONTRACT)
+        result = akshare.stock_individual_info_em(symbol=symbols[0])
+        data = _standardize_profile_payload(result, request_data, code_key="stock_codes")
         return build_standard_result(
             PROFILE_INFO_CONTRACT,
-            normalized,
+            data,
             raw_payload=result,
-            metadata={
-                "symbol": request_data["symbol"],
-                "market": request_data.get("market"),
-                "backend": BackendName.AKSHARE.value,
-            },
+            metadata={"backend": BackendName.AKSHARE.value},
         )
 
 
-class AkshareFundNavHistoryHandler(CapabilityHandler):
-    """`akshare` 的基金净值历史能力实现。"""
-
-    capability_name = "fund.nav.history"
+class AkshareStockPriceLiveHandler(CapabilityHandler):
+    capability_name = "stock.price.live"
 
     def execute(self, request_data: dict[str, object]):
-        akshare = _load_akshare_module()
-        result = akshare.fund_open_fund_info_em(
-            symbol=str(request_data["symbol"]),
-            indicator="单位净值走势",
-        )
-        frame = _coerce_history_frame(result)
-        rows = _standardize_fund_nav_history_frame(
-            frame,
-            symbol=str(request_data["symbol"]),
-        )
-        limit = request_data.get("record_limit")
-        if isinstance(limit, int) and limit > 0:
-            rows = rows[:limit]
-        return build_standard_result(
-            FUND_NAV_HISTORY_CONTRACT,
-            rows,
-            raw_payload=result,
-            metadata={
-                "symbol": request_data["symbol"],
-                "backend": BackendName.AKSHARE.value,
-            },
-        )
-
-
-class AkshareEquityPriceLiveHandler(CapabilityHandler):
-    """`akshare` 的权益实时列表能力实现。"""
-
-    capability_name = "equity.price.live"
-
-    def execute(self, request_data: dict[str, object]):
-        market = request_data.get("market")
+        market = _extract_market_value(_get_request_value(request_data, "fs", "market"))
         if market not in (None, "", "A_stock"):
-            raise ValueError("Akshare equity.price.live 当前仅支持 A_stock 市场")
+            raise ValueError("Akshare stock.price.live 当前仅支持 A_stock 市场")
 
         akshare = _load_akshare_module()
         result = akshare.stock_zh_a_spot_em()
@@ -468,23 +298,37 @@ class AkshareEquityPriceLiveHandler(CapabilityHandler):
             market_name="A_stock",
             provider_name=BackendName.AKSHARE.value,
         )
-        limit = request_data.get("record_limit")
-        if isinstance(limit, int) and limit > 0:
-            rows = rows[:limit]
         return build_standard_result(
             REALTIME_QUOTES_CONTRACT,
             rows,
             raw_payload=result,
-            metadata={
-                "market": "A_stock",
-                "backend": BackendName.AKSHARE.value,
-            },
+            metadata={"backend": BackendName.AKSHARE.value},
+        )
+
+
+class AkshareFundNavHistoryHandler(CapabilityHandler):
+    capability_name = "fund.nav.history"
+
+    def execute(self, request_data: dict[str, object]):
+        akshare = _load_akshare_module()
+        result = akshare.fund_open_fund_info_em(
+            symbol=str(_get_request_value(request_data, "fund_code", "symbol")),
+            indicator="单位净值走势",
+        )
+        frame = _coerce_history_frame(result)
+        rows = _standardize_fund_nav_history_frame(
+            frame,
+            symbol=str(_get_request_value(request_data, "fund_code", "symbol")),
+        )
+        return build_standard_result(
+            FUND_NAV_HISTORY_CONTRACT,
+            rows,
+            raw_payload=result,
+            metadata={"backend": BackendName.AKSHARE.value},
         )
 
 
 class AkshareIndustryBoardsHandler(CapabilityHandler):
-    """`akshare` 行业板块列表扩展命令实现。"""
-
     capability_name = "akshare.industry.boards"
 
     def execute(self, request_data: dict[str, object]):
@@ -507,20 +351,288 @@ class AkshareIndustryBoardsHandler(CapabilityHandler):
         )
 
 
-def _load_akshare_module():
-    """惰性加载 `akshare`，避免未安装时在导入阶段直接失败。"""
+def _standardize_efinance_result(
+    command_key: str,
+    request_data: dict[str, object],
+    result: object,
+):
+    if command_key == "search.local":
+        return _build_search_standard_result(result)
+    if command_key in PRICE_HISTORY_COMMAND_KEYS:
+        return _build_history_standard_result(command_key, request_data, result)
+    if command_key == "fund.nav.history":
+        symbol = str(_get_request_value(request_data, "fund_code", "symbol"))
+        return _build_fund_nav_history_standard_result(result, symbol)
+    if command_key == "fund.nav.history-batch":
+        return _build_fund_nav_history_batch_result(result)
+    if command_key in REALTIME_COMMAND_KEYS:
+        return _build_realtime_standard_result(command_key, request_data, result)
+    if command_key in PROFILE_COMMAND_KEYS:
+        data = _standardize_profile_payload(result, request_data)
+        return build_standard_result(
+            PROFILE_INFO_CONTRACT,
+            data,
+            raw_payload=result,
+            metadata={"backend": BackendName.EFINANCE.value},
+        )
+    if command_key == "resolve.quote-id":
+        return build_standard_result(
+            SCALAR_VALUE_CONTRACT,
+            {"quote_id": _normalize_scalar(result)},
+            raw_payload=result,
+            metadata={"backend": BackendName.EFINANCE.value},
+        )
+    if command_key in SCALAR_LIST_COMMAND_KEYS:
+        data = [_normalize_scalar(item) for item in list(result or [])]
+        return build_standard_result(
+            SCALAR_LIST_CONTRACT,
+            data,
+            raw_payload=result,
+            metadata={"backend": BackendName.EFINANCE.value},
+        )
+    if command_key in SIDE_EFFECT_COMMAND_KEYS:
+        return build_standard_result(
+            SIDE_EFFECT_STATUS_CONTRACT,
+            {
+                "status": "ok",
+                "message": f"{command_key} executed",
+                "command_key": command_key,
+            },
+            raw_payload=result,
+            metadata={"backend": BackendName.EFINANCE.value},
+        )
+    payload = _standardize_generic_payload(result)
+    return build_standard_result(
+        PROVIDER_RECORDS_CONTRACT,
+        payload,
+        raw_payload=result,
+        metadata={"backend": BackendName.EFINANCE.value},
+    )
 
-    try:
-        return importlib.import_module("akshare")
-    except ModuleNotFoundError as exc:
-        raise RuntimeError(
-            "Akshare backend is unavailable because package 'akshare' is not installed."
-        ) from exc
+
+def _build_search_standard_result(result: object):
+    rows: list[dict[str, object]] = []
+    if result is None:
+        return build_standard_result(SEARCH_RESULTS_CONTRACT, rows, raw_payload=result)
+    items = result if isinstance(result, list) else [result]
+    for item in items:
+        payload = item._asdict() if hasattr(item, "_asdict") else dict(item)
+        normalized = normalize_contract_mapping(payload, SEARCH_RESULTS_CONTRACT)
+        ensure_mapping_has_required_fields(normalized, SEARCH_RESULTS_CONTRACT)
+        rows.append(normalized)
+    return build_standard_result(SEARCH_RESULTS_CONTRACT, rows, raw_payload=result)
+
+
+def _build_history_standard_result(
+    command_key: str,
+    request_data: dict[str, object],
+    result: object,
+):
+    symbol_key = {
+        "stock.price.history": "stock_codes",
+        "bond.price.history": "bond_codes",
+        "futures.price.history": "quote_ids",
+        "quote.price.history": "codes",
+    }[command_key]
+    symbols = _coerce_symbol_list(request_data.get(symbol_key))
+    frames = _coerce_frame_mapping(result)
+    if isinstance(frames, pd.DataFrame):
+        symbol = symbols[0] if symbols else ""
+        rows = _standardize_history_frame(
+            frames,
+            symbol=symbol,
+            provider_name=BackendName.EFINANCE.value,
+        )
+        return build_standard_result(
+            HISTORY_BARS_CONTRACT,
+            rows,
+            raw_payload=result,
+            metadata={"backend": BackendName.EFINANCE.value},
+        )
+
+    mapping: dict[str, list[dict[str, object]]] = {}
+    for key, frame in frames.items():
+        mapping[str(key)] = _standardize_history_frame(
+            frame,
+            symbol=str(key),
+            provider_name=BackendName.EFINANCE.value,
+        )
+    return build_standard_result(
+        HISTORY_BARS_CONTRACT,
+        mapping,
+        raw_payload=result,
+        metadata={"backend": BackendName.EFINANCE.value},
+    )
+
+
+def _build_fund_nav_history_standard_result(result: object, symbol: str):
+    frame = _coerce_history_frame(result)
+    rows = _standardize_fund_nav_history_frame(frame, symbol=symbol)
+    return build_standard_result(
+        FUND_NAV_HISTORY_CONTRACT,
+        rows,
+        raw_payload=result,
+        metadata={"backend": BackendName.EFINANCE.value},
+    )
+
+
+def _build_fund_nav_history_batch_result(result: object):
+    if not isinstance(result, dict):
+        raise StandardizationError("Fund nav batch result must be a mapping")
+    mapping: dict[str, list[dict[str, object]]] = {}
+    for key, frame in result.items():
+        mapping[str(key)] = _standardize_fund_nav_history_frame(
+            _coerce_history_frame(frame),
+            symbol=str(key),
+        )
+    return build_standard_result(
+        FUND_NAV_HISTORY_CONTRACT,
+        mapping,
+        raw_payload=result,
+        metadata={"backend": BackendName.EFINANCE.value},
+    )
+
+
+def _build_realtime_standard_result(
+    command_key: str,
+    request_data: dict[str, object],
+    result: object,
+):
+    if isinstance(result, pd.Series):
+        frame = pd.DataFrame([result.to_dict()])
+    else:
+        frame = _coerce_history_frame(result)
+    market_name = _extract_market_name(command_key, request_data)
+    rows = _standardize_realtime_quotes_frame(
+        frame,
+        market_name=market_name,
+        provider_name=BackendName.EFINANCE.value,
+    )
+    return build_standard_result(
+        REALTIME_QUOTES_CONTRACT,
+        rows,
+        raw_payload=result,
+        metadata={"backend": BackendName.EFINANCE.value, "market": market_name},
+    )
+
+
+def _extract_market_name(command_key: str, request_data: dict[str, object]) -> str:
+    if command_key == "market.price.live":
+        value = request_data.get("fs")
+    elif command_key in {"stock.price.live", "stock.price.latest", "stock.price.snapshot"}:
+        value = request_data.get("fs")
+    else:
+        value = request_data.get("market_type")
+    extracted = _extract_market_value(value)
+    if extracted not in (None, ""):
+        return str(extracted)
+
+    default_market_map = {
+        "stock.price.live": "A_stock",
+        "stock.price.latest": "A_stock",
+        "stock.price.snapshot": "A_stock",
+        "bond.price.live": "bond",
+        "futures.price.live": "futures",
+        "quote.price.latest": "quote",
+        "market.price.live": "market",
+    }
+    return default_market_map.get(command_key, "A_stock")
+
+
+def _extract_market_value(value: object) -> object | None:
+    if value in (None, "", (), []):
+        return None
+    if isinstance(value, (list, tuple)):
+        return value[0] if value else None
+    return value
+
+
+def _standardize_profile_payload(
+    result: object,
+    request_data: dict[str, object],
+    *,
+    code_key: str | None = None,
+) -> object:
+    code_key = code_key or _profile_code_key_from_request(request_data)
+    codes = _coerce_symbol_list(request_data.get(code_key)) if code_key else []
+
+    if isinstance(result, pd.Series):
+        normalized = _normalize_profile_mapping(result.to_dict(), codes[0] if codes else None)
+        return normalized
+
+    if isinstance(result, pd.DataFrame) and {"item", "value"}.issubset(result.columns):
+        row = {
+            str(item): _normalize_scalar(value)
+            for item, value in zip(result["item"], result["value"], strict=False)
+        }
+        return _normalize_profile_mapping(row, codes[0] if codes else None)
+
+    if isinstance(result, pd.DataFrame):
+        rows: list[dict[str, object]] = []
+        for index, (_, row) in enumerate(result.iterrows()):
+            fallback_code = codes[index] if index < len(codes) else None
+            rows.append(_normalize_profile_mapping(row.to_dict(), fallback_code))
+        return rows
+
+    if isinstance(result, dict):
+        return _normalize_profile_mapping(result, codes[0] if codes else None)
+
+    raise StandardizationError(f"Unsupported profile payload type: {type(result).__name__}")
+
+
+def _normalize_profile_mapping(row: dict[str, object], fallback_code: str | None) -> dict[str, object]:
+    normalized = normalize_contract_mapping(row, PROFILE_INFO_CONTRACT)
+    if "code" not in normalized and fallback_code:
+        normalized["code"] = fallback_code
+    if "quote_id" not in normalized and "code" in normalized:
+        normalized["quote_id"] = normalized["code"]
+    if "name" not in normalized and fallback_code:
+        normalized["name"] = fallback_code
+    ensure_mapping_has_required_fields(normalized, PROFILE_INFO_CONTRACT)
+    return normalized
+
+
+def _profile_code_key_from_request(request_data: Mapping[str, object]) -> str | None:
+    for key in ("stock_codes", "fund_codes", "bond_codes", "quote_id", "quote_id_list"):
+        if key in request_data:
+            return key
+    return None
+
+
+def _get_request_value(request_data: Mapping[str, object], *keys: str, default: object = None) -> object:
+    for key in keys:
+        if key in request_data and request_data[key] not in (None, "", (), []):
+            return request_data[key]
+    return default
+
+
+def _coerce_symbol_list(value: object) -> list[str]:
+    if value in (None, "", (), []):
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
+def _coerce_frame_mapping(result: object) -> pd.DataFrame | dict[str, pd.DataFrame]:
+    if isinstance(result, pd.DataFrame):
+        return result
+    if isinstance(result, dict):
+        mapping: dict[str, pd.DataFrame] = {}
+        for key, value in result.items():
+            if isinstance(value, pd.DataFrame):
+                mapping[str(key)] = value
+            else:
+                raise StandardizationError("History payload mapping values must be DataFrame")
+        return mapping
+    raise StandardizationError(f"Unsupported history payload type: {type(result).__name__}")
 
 
 def _resolve_efinance_market_type(market_name: object):
-    """把共享 market 参数解析为 `efinance` 的市场枚举。"""
-
+    if market_name in (None, ""):
+        return None
+    if isinstance(market_name, (list, tuple)):
+        market_name = market_name[0] if market_name else None
     if market_name in (None, ""):
         return None
     if not isinstance(market_name, str):
@@ -531,9 +643,16 @@ def _resolve_efinance_market_type(market_name: object):
     return market_type
 
 
-def _coerce_history_frame(result: object) -> pd.DataFrame:
-    """把 provider 历史结果收敛为单个 DataFrame。"""
+def _load_akshare_module():
+    try:
+        return importlib.import_module("akshare")
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Akshare backend is unavailable because package 'akshare' is not installed."
+        ) from exc
 
+
+def _coerce_history_frame(result: object) -> pd.DataFrame:
     if isinstance(result, pd.DataFrame):
         return result
     if isinstance(result, dict):
@@ -545,41 +664,20 @@ def _coerce_history_frame(result: object) -> pd.DataFrame:
     raise StandardizationError(f"Unsupported history payload type: {type(result).__name__}")
 
 
-def _coerce_profile_row(result: object) -> dict[str, object]:
-    """把 provider 资料结果收敛为单行映射。"""
-
-    if isinstance(result, pd.Series):
-        return result.to_dict()
-    if isinstance(result, pd.DataFrame):
-        if result.empty:
-            return {}
-        if {"item", "value"}.issubset(result.columns):
-            return {
-                str(item): _normalize_scalar(value)
-                for item, value in zip(result["item"], result["value"], strict=False)
-            }
-        return result.iloc[0].to_dict()
-    if isinstance(result, dict):
-        return result
-    raise StandardizationError(f"Unsupported profile payload type: {type(result).__name__}")
-
-
 def _standardize_history_frame(
     frame: pd.DataFrame,
     *,
     symbol: str,
     provider_name: str,
 ) -> list[dict[str, object]]:
-    """把历史 DataFrame 标准化为共享历史契约。"""
-
     if frame is None or frame.empty:
         return []
 
     rows: list[dict[str, object]] = []
     for _, row in frame.iterrows():
         item = {
-            "date": _pick_first_present_value(row, ("日期", "时间")),
-            "symbol": _pick_first_present_value(row, ("股票代码", "代码")) or symbol,
+            "date": _pick_first_present_value(row, ("date", "日期", "时间")),
+            "symbol": _pick_first_present_value(row, ("symbol", "股票代码", "债券代码", "期货代码", "代码")) or symbol,
             "open": _pick_first_present_value(row, ("开盘", "open")),
             "close": _pick_first_present_value(row, ("收盘", "最新价", "close")),
             "high": _pick_first_present_value(row, ("最高", "high")),
@@ -596,6 +694,7 @@ def _standardize_history_frame(
         if "symbol" not in normalized:
             normalized["symbol"] = symbol
         ensure_mapping_has_required_fields(normalized, HISTORY_BARS_CONTRACT)
+        normalized["provider_name"] = provider_name
         rows.append(normalized)
     return rows
 
@@ -605,8 +704,6 @@ def _standardize_fund_nav_history_frame(
     *,
     symbol: str,
 ) -> list[dict[str, object]]:
-    """把基金净值历史 DataFrame 标准化为共享基金净值契约。"""
-
     if frame is None or frame.empty:
         return []
 
@@ -634,18 +731,25 @@ def _standardize_realtime_quotes_frame(
     market_name: str,
     provider_name: str,
 ) -> list[dict[str, object]]:
-    """把实时行情列表标准化为共享实时契约。"""
-
     if frame is None or frame.empty:
         return []
 
     rows: list[dict[str, object]] = []
     for _, row in frame.iterrows():
         item = {
-            "symbol": _pick_first_present_value(row, ("symbol", "代码", "股票代码", "证券代码")),
-            "name": _pick_first_present_value(row, ("name", "名称", "股票名称", "证券简称")),
+            "symbol": _pick_first_present_value(
+                row,
+                ("symbol", "代码", "股票代码", "债券代码", "期货代码", "证券代码"),
+            ),
+            "name": _pick_first_present_value(
+                row,
+                ("name", "名称", "股票名称", "债券名称", "期货名称", "证券简称"),
+            ),
             "close": _pick_first_present_value(row, ("close", "最新价", "收盘")),
-            "quote_id": _pick_first_present_value(row, ("quote_id", "行情ID", "symbol", "代码", "股票代码", "证券代码")),
+            "quote_id": _pick_first_present_value(
+                row,
+                ("quote_id", "行情ID", "symbol", "代码", "股票代码", "债券代码", "期货代码", "证券代码"),
+            ),
             "market": _pick_first_present_value(row, ("market", "市场", "市场类型")) or market_name,
             "open": _pick_first_present_value(row, ("open", "今开", "开盘")),
             "high": _pick_first_present_value(row, ("high", "最高")),
@@ -675,8 +779,6 @@ def _standardize_provider_records_frame(
     *,
     provider_name: str,
 ) -> list[dict[str, object]]:
-    """把 provider 扩展列表结果标准化为通用 records 契约。"""
-
     if frame is None or frame.empty:
         return []
 
@@ -696,9 +798,30 @@ def _standardize_provider_records_frame(
     return rows
 
 
-def _pick_first_present_value(row: pd.Series, candidates: tuple[str, ...]) -> object | None:
-    """从候选列名里提取第一个非空值。"""
+def _standardize_generic_payload(result: object) -> object:
+    if isinstance(result, pd.DataFrame):
+        return [
+            {str(key): _normalize_scalar(value) for key, value in row.items()}
+            for row in result.to_dict(orient="records")
+        ]
+    if isinstance(result, pd.Series):
+        return {str(key): _normalize_scalar(value) for key, value in result.to_dict().items()}
+    if isinstance(result, Mapping):
+        return {str(key): _standardize_generic_payload(value) for key, value in result.items()}
+    if isinstance(result, Sequence) and not isinstance(result, (str, bytes, bytearray)):
+        payload: list[object] = []
+        for item in result:
+            if isinstance(item, (Mapping, pd.DataFrame, pd.Series)):
+                payload.append(_standardize_generic_payload(item))
+            elif hasattr(item, "_asdict"):
+                payload.append(_standardize_generic_payload(item._asdict()))
+            else:
+                payload.append(_normalize_scalar(item))
+        return payload
+    return _normalize_scalar(result)
 
+
+def _pick_first_present_value(row: pd.Series, candidates: tuple[str, ...]) -> object | None:
     for candidate in candidates:
         if candidate in row.index and pd.notna(row[candidate]):
             return row[candidate]
@@ -706,8 +829,6 @@ def _pick_first_present_value(row: pd.Series, candidates: tuple[str, ...]) -> ob
 
 
 def _normalize_scalar(value: object) -> object:
-    """把 provider 原始标量标准化为基础 Python 类型。"""
-
     if value is None:
         return None
     if isinstance(value, pd.Timestamp):
@@ -729,8 +850,6 @@ def _filter_search_rows(
     rows: list[dict[str, object]],
     query: str,
 ) -> list[dict[str, object]]:
-    """按 query 对候选结果做大小写无关的模糊过滤。"""
-
     lowered = query.strip().lower()
     if not lowered:
         return rows
@@ -749,8 +868,6 @@ def _filter_search_rows(
 
 
 def _deduplicate_search_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
-    """按 code + classify 去重，保留首个命中的结果。"""
-
     deduplicated: list[dict[str, object]] = []
     seen: set[tuple[str, str]] = set()
     for row in rows:
@@ -763,46 +880,42 @@ def _deduplicate_search_rows(rows: list[dict[str, object]]) -> list[dict[str, ob
 
 
 def build_efinance_provider() -> BackendProvider:
-    """构造 `efinance` provider。"""
+    handlers: dict[str, CapabilityHandler] = {}
+    for definition in SHARED_COMMANDS:
+        if BackendName.EFINANCE not in definition.supported_backends:
+            continue
+        if definition.command_key == "instrument.search":
+            handlers[definition.capability] = EfinanceSearchHandler()
+        else:
+            handlers[definition.capability] = EfinanceGenericHandler(definition.capability)
 
     return BackendProvider(
         backend_name=BackendName.EFINANCE,
-        handlers={
-            "equity.price.live": EfinanceEquityPriceLiveHandler(),
-            "fund.nav.history": EfinanceFundNavHistoryHandler(),
-            "equity.profile": EfinanceEquityProfileHandler(),
-            "equity.price.history": EfinanceEquityPriceHistoryHandler(),
-            "instrument.search": EfinanceSearchHandler(),
-        },
+        handlers=handlers,
     )
 
 
 def build_akshare_provider() -> BackendProvider:
-    """构造 `akshare` provider。
-
-    当前阶段先实现共享搜索能力，其余能力后续逐步迁移。
-    """
-
     return BackendProvider(
         backend_name=BackendName.AKSHARE,
         handlers={
             "akshare.industry.boards": AkshareIndustryBoardsHandler(),
-            "equity.price.live": AkshareEquityPriceLiveHandler(),
+            "stock.price.live": AkshareStockPriceLiveHandler(),
             "fund.nav.history": AkshareFundNavHistoryHandler(),
-            "equity.profile": AkshareEquityProfileHandler(),
-            "equity.price.history": AkshareEquityPriceHistoryHandler(),
+            "stock.profile": AkshareStockProfileHandler(),
+            "stock.price.history": AkshareStockPriceHistoryHandler(),
             "instrument.search": AkshareSearchHandler(),
         },
         extension_commands=(
             CommandDefinition(
                 command_key="akshare.industry.boards",
-                cli_path=("akshare", "industry", "boards"),
+                cli_path=("stock", "industry", "boards"),
                 capability="akshare.industry.boards",
                 request_schema=RequestSchema(
                     schema_name="akshare-industry-boards-request",
                     fields=(),
                 ),
-                help_text="获取 akshare 行业板块列表。",
+                help_text="获取行业板块列表（akshare 专属扩展）。",
                 kind=CommandKind.PROVIDER_EXTENSION,
                 supported_backends=(BackendName.AKSHARE,),
                 allow_watch=True,

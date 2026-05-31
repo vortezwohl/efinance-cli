@@ -49,8 +49,14 @@ def resolve_backend_selection(
 
     if not definition.supports_backend(normalized):
         supported = ", ".join(item.value for item in definition.supported_backends)
+        if definition.kind.value == "provider-extension" and definition.provider_name is not None:
+            default_backend = definition.provider_name.value
+            raise click.ClickException(
+                f"命令 '{' '.join(definition.cli_path)}' 仅支持 backend: {supported}。"
+                f"该命令默认会路由到 '{default_backend}'，请不要显式传入 --backend {normalized.value}。"
+            )
         raise click.ClickException(
-            f"Command '{definition.command_key}' does not support backend '{normalized.value}'. "
-            f"Supported backends: {supported}"
+            f"命令 '{' '.join(definition.cli_path)}' 不支持 backend '{normalized.value}'。"
+            f"支持的 backend: {supported}"
         )
     return BackendSelection(requested=normalize_backend_name(requested_backend), resolved=normalized, source=source)

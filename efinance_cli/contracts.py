@@ -1,13 +1,4 @@
-"""标准结果契约模型。
-
-该模块先定义首批共享能力需要的契约骨架，重点是把“核心字段、可选字段、原始字段、
-扩展字段”四件事显式化。当前阶段覆盖：
-
-- 搜索结果契约；
-- 历史行情契约。
-
-后续资料信息和实时行情契约继续沿同一路径扩展。
-"""
+"""标准结果契约模型。"""
 
 from __future__ import annotations
 
@@ -71,11 +62,11 @@ FUND_NAV_HISTORY_CONTRACT = ResultContract(
     required_fields=("date", "symbol", "unit_nav"),
     optional_fields=("accumulated_nav", "change_pct"),
     field_aliases={
-        "date": ("date", "����", "ʱ��"),
-        "symbol": ("symbol", "�������", "����"),
-        "unit_nav": ("unit_nav", "��λ��ֵ"),
-        "accumulated_nav": ("accumulated_nav", "�ۼƾ�ֵ"),
-        "change_pct": ("change_pct", "�ǵ���"),
+        "date": ("date", "日期", "净值日期", "时间"),
+        "symbol": ("symbol", "基金代码", "代码"),
+        "unit_nav": ("unit_nav", "单位净值"),
+        "accumulated_nav": ("accumulated_nav", "累计净值"),
+        "change_pct": ("change_pct", "涨跌幅", "日增长率"),
     },
 )
 
@@ -126,6 +117,27 @@ PROVIDER_RECORDS_CONTRACT = ResultContract(
         "latest": ("latest", "最新价"),
         "change_pct": ("change_pct", "涨跌幅"),
         "provider_name": ("provider_name",),
+    },
+)
+
+SCALAR_LIST_CONTRACT = ResultContract(
+    contract_name="scalar-list",
+    required_fields=(),
+)
+
+SCALAR_VALUE_CONTRACT = ResultContract(
+    contract_name="scalar-value",
+    required_fields=(),
+)
+
+SIDE_EFFECT_STATUS_CONTRACT = ResultContract(
+    contract_name="side-effect-status",
+    required_fields=("status",),
+    optional_fields=("message", "command_key"),
+    field_aliases={
+        "status": ("status",),
+        "message": ("message",),
+        "command_key": ("command_key",),
     },
 )
 

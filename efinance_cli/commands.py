@@ -1,7 +1,9 @@
 """Click 命令构建层。
 
-该模块只负责挂载 shared 命令目录与 provider 扩展命令目录。
+该模块负责挂载 shared 命令目录与 provider 扩展命令。
 旧的函数驱动命令树已经被下线，命令面不再从第三方函数签名动态反射生成。
+provider-specific 扩展命令也不再以 provider 名称直接暴露为顶层根组，而是按
+自身声明的业务语义路径挂到统一命令树中。
 """
 
 from __future__ import annotations
@@ -46,8 +48,9 @@ def create_root_command() -> click.Group:
     for group_name in list_shared_root_groups():
         cli.add_command(create_shared_root_group(group_name))
 
-    for backend_name, definitions in list_provider_extension_commands().items():
-        cli.add_command(create_provider_extension_root_group(backend_name.value, definitions))
+    for definition in list_provider_extension_commands():
+        root_group = _get_or_create_root_group(cli, definition.root_group)
+        attach_definition_to_tree(root_group, definition)
     return cli
 
 
@@ -64,19 +67,21 @@ def create_shared_root_group(group_name: str) -> click.Group:
     return group
 
 
-def create_provider_extension_root_group(
-    group_name: str,
-    definitions: tuple[CommandDefinition, ...],
-) -> click.Group:
-    """根据 provider 扩展命令目录创建根命令组。"""
+def _get_or_create_root_group(cli: click.Group, group_name: str) -> click.Group:
+    """按根组名获取或创建顶层命令分组。"""
+
+    existing = cli.commands.get(group_name)
+    if existing is not None:
+        if not isinstance(existing, click.Group):
+            raise ValueError(f"Top-level path conflict at {group_name}")
+        return existing
 
     @click.group(name=group_name)
     def group() -> None:
-        """provider 扩展命令分组。"""
+        """动态创建的命令语义分组。"""
 
-    group.help = f"{group_name} provider 扩展命令。"
-    for definition in definitions:
-        attach_definition_to_tree(group, definition)
+    group.help = SHARED_GROUP_HELP_TEXT.get(group_name, f"{group_name} 命令分组。")
+    cli.add_command(group)
     return group
 
 def attach_definition_to_tree(root_group: click.Group, definition: CommandDefinition) -> None:
@@ -256,7 +261,7 @@ def create_search_group() -> click.Group:
         if ctx.resilient_parsing:
             return
         if ctx.invoked_subcommand is None:
-            if not kwargs.get("query"):
+            if not kwargs.get("keyword"):
                 raise click.ClickException("Missing option '--query'.")
             ctx.invoke(default_search_command.callback, **kwargs)
 
@@ -264,9 +269,15 @@ def create_search_group() -> click.Group:
     default_search_command.hidden = True
     search_group.params = list(default_search_command.params)
     for parameter in search_group.params:
-        if isinstance(parameter, click.Option) and parameter.name == "query":
+        if isinstance(parameter, click.Option) and parameter.name == "keyword":
             parameter.required = False
     search_group.help = "根据关键字搜索证券候选项。"
+    from efinance_cli.command_catalog import build_shared_command_definitions_for_group
+
+    for definition in build_shared_command_definitions_for_group("search"):
+        if definition.command_key == "instrument.search":
+            continue
+        attach_definition_to_tree(search_group, definition)
     return search_group
 
 

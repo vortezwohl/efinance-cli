@@ -3,9 +3,9 @@
 该模块位于指标增强层与渲染层之间，负责把增强后的 shared / provider-extension
 结果整理为统一 observation payload。当前主链约束如下：
 
-1. `equity.price.history` 走历史行情 observation 模板。
-2. `equity.profile` 通过标准历史补充接口回补后走单标的 observation 模板。
-3. `equity.price.live` 对实时列表逐行回补后走多 source observation 模板。
+1. `stock.price.history`、`bond.price.history`、`futures.price.history`、`quote.price.history` 与 `fund.nav.history` 走历史序列 observation 模板。
+2. `stock.profile`、`fund.profile`、`bond.profile`、`quote.profile` 通过标准历史补充接口回补后走单标的 observation 模板。
+3. `stock.price.live`、`bond.price.live`、`futures.price.live` 与 `quote.price.latest` 对实时列表逐行回补后走多 source observation 模板。
 4. 其他 shared 结果与 provider-extension 结果统一落到 generic observation 兜底。
 
 分流依据是稳定 command key 与结果契约，而不是旧函数驱动命令分类。
@@ -43,8 +43,8 @@ RAW_FIELD_ALIASES: dict[str, list[str]] = {
     "code": ["股票代码", "债券代码", "期货代码", "基金代码", "代码", "行情ID", "symbol", "code", "quote_id"],
     "name": ["股票名称", "债券名称", "期货名称", "基金名称", "名称", "name"],
     "date": ["日期", "时间", "date"],
-    "close": ["收盘", "最新价", "单位净值", "close"],
-    "open": ["开盘", "今开", "open"],
+    "close": ["收盘", "最新价", "单位净值", "unit_nav", "close"],
+    "open": ["开盘", "今开", "单位净值", "unit_nav", "open"],
     "high": ["最高", "high"],
     "low": ["最低", "low"],
     "volume": ["成交量", "volume"],
@@ -143,10 +143,49 @@ TRACE_GROUPS: dict[str, list[str]] = {
 }
 
 SHARED_OBSERVATION_CONTRACTS: dict[str, ResultContract] = {
-    "equity.price.history": HISTORY_BARS_CONTRACT,
-    "equity.profile": PROFILE_INFO_CONTRACT,
+    "stock.price.history": HISTORY_BARS_CONTRACT,
+    "bond.price.history": HISTORY_BARS_CONTRACT,
+    "futures.price.history": HISTORY_BARS_CONTRACT,
+    "quote.price.history": HISTORY_BARS_CONTRACT,
+    "fund.nav.history-batch": FUND_NAV_HISTORY_CONTRACT,
+    "bond.profile": PROFILE_INFO_CONTRACT,
+    "fund.profile": PROFILE_INFO_CONTRACT,
+    "quote.profile": PROFILE_INFO_CONTRACT,
+    "stock.profile": PROFILE_INFO_CONTRACT,
     "fund.nav.history": FUND_NAV_HISTORY_CONTRACT,
-    "equity.price.live": REALTIME_QUOTES_CONTRACT,
+    "stock.price.live": REALTIME_QUOTES_CONTRACT,
+    "stock.price.latest": REALTIME_QUOTES_CONTRACT,
+    "stock.price.snapshot": REALTIME_QUOTES_CONTRACT,
+    "bond.price.live": REALTIME_QUOTES_CONTRACT,
+    "futures.price.live": REALTIME_QUOTES_CONTRACT,
+    "quote.price.latest": REALTIME_QUOTES_CONTRACT,
+    "market.price.live": REALTIME_QUOTES_CONTRACT,
+}
+
+HISTORY_OBSERVATION_COMMAND_KEYS: set[str] = {
+    "stock.price.history",
+    "bond.price.history",
+    "futures.price.history",
+    "quote.price.history",
+    "fund.nav.history",
+    "fund.nav.history-batch",
+}
+
+PROFILE_OBSERVATION_COMMAND_KEYS: set[str] = {
+    "stock.profile",
+    "fund.profile",
+    "bond.profile",
+    "quote.profile",
+}
+
+REALTIME_OBSERVATION_COMMAND_KEYS: set[str] = {
+    "stock.price.live",
+    "stock.price.latest",
+    "stock.price.snapshot",
+    "bond.price.live",
+    "futures.price.live",
+    "quote.price.latest",
+    "market.price.live",
 }
 
 
@@ -159,11 +198,11 @@ def build_observation_output(request: Any, value: Any) -> Any:
     value = normalize_shared_observation_input(request, value)
     command_key = resolve_observation_command_key(request)
 
-    if command_key == "equity.price.history":
+    if command_key in HISTORY_OBSERVATION_COMMAND_KEYS:
         return build_history_observation_output(request, value)
-    if command_key == "equity.profile":
+    if command_key in PROFILE_OBSERVATION_COMMAND_KEYS:
         return build_single_row_observation_output(request, value)
-    if command_key == "equity.price.live":
+    if command_key in REALTIME_OBSERVATION_COMMAND_KEYS:
         return build_realtime_list_observation_output(request, value)
     return build_generic_observation_output(request, value)
 
@@ -356,14 +395,20 @@ def resolve_history_lookup_code(request: Any, row: pd.Series) -> str | None:
     """解析用于历史回补的标的标识。"""
 
     command_key = resolve_observation_command_key(request)
-    if command_key == "equity.price.live":
-        symbol = find_first_present_value(row, ["symbol", "code", "quote_id"])
+    if command_key in REALTIME_OBSERVATION_COMMAND_KEYS:
+        symbol = find_first_present_value(row, ["quote_id", "symbol", "code"])
         if symbol is not None:
             return str(symbol)
-    if command_key == "equity.profile":
-        symbol = request.kwargs.get("symbol")
-        if symbol:
+    if command_key in PROFILE_OBSERVATION_COMMAND_KEYS:
+        symbol = extract_code_from_series(row)
+        if symbol is not None:
             return str(symbol)
+        for field_name in ("stock_codes", "fund_codes", "bond_codes", "quote_id", "quote_id_list"):
+            value = request.kwargs.get(field_name)
+            if isinstance(value, (list, tuple)) and value:
+                return str(value[0])
+            if value not in (None, ""):
+                return str(value)
     return extract_code_from_series(row)
 
 
@@ -421,7 +466,7 @@ def build_meta(request: Any, frame: pd.DataFrame, latest_quote: dict[str, Any]) 
 
     meta = {
         "module": request.spec.module_name,
-        "function": request.spec.function_name,
+        "function": resolve_meta_function_name(request),
         "view": "observation",
         "indicator_level": normalize_indicator_level(request.output.indicator_level),
         "trace_window": normalize_trace_window(request.output.trace_window),
@@ -440,7 +485,7 @@ def build_generic_meta(request: Any, value: Any) -> dict[str, Any]:
 
     meta = {
         "module": request.spec.module_name,
-        "function": request.spec.function_name,
+        "function": resolve_meta_function_name(request),
         "view": "observation",
         "indicator_level": normalize_indicator_level(request.output.indicator_level),
         "trace_window": normalize_trace_window(request.output.trace_window),
@@ -926,3 +971,9 @@ def normalize_scalar(value: Any) -> Any:
         except Exception:
             return str(value)
     return str(value)
+
+
+def resolve_meta_function_name(request: Any) -> str:
+    """优先在 observation 元信息中暴露现行稳定命令键。"""
+
+    return resolve_observation_command_key(request) or request.spec.function_name

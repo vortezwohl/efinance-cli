@@ -1,10 +1,15 @@
-"""provider 注册表与获取入口。"""
+"""provider 注册表与获取入口。
+
+该模块集中暴露当前可用 provider 以及它们声明的 provider-specific 扩展命令。
+命令装配层不应再把 provider 名称直接暴露为顶层 CLI 根组，而应按扩展命令
+自身声明的业务语义路径进行挂载。
+"""
 
 from __future__ import annotations
 
 from efinance_cli.backends.base import BackendProvider
 from efinance_cli.backends.providers import build_akshare_provider, build_efinance_provider
-from efinance_cli.models import BackendName
+from efinance_cli.models import BackendName, CommandDefinition
 
 
 def list_backend_providers() -> dict[BackendName, BackendProvider]:
@@ -32,11 +37,10 @@ def get_backend_provider(backend_name: BackendName) -> BackendProvider:
         raise KeyError(f"未知 backend: {backend_name.value}") from exc
 
 
-def list_provider_extension_commands() -> dict[BackendName, tuple]:
-    """返回各 provider 注册的扩展命令定义。"""
+def list_provider_extension_commands() -> tuple[CommandDefinition, ...]:
+    """返回全部 provider 注册的扩展命令定义。"""
 
-    return {
-        backend_name: provider.extension_commands
-        for backend_name, provider in list_backend_providers().items()
-        if provider.extension_commands
-    }
+    definitions: list[CommandDefinition] = []
+    for provider in list_backend_providers().values():
+        definitions.extend(provider.extension_commands)
+    return tuple(definitions)

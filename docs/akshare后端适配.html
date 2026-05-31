@@ -757,7 +757,7 @@ class BackendProvider(Protocol):
         <ol>
           <li>先重建 <code>CommandDefinition</code>、<code>CommandRequest</code> 与 request schema，不再让 CLI 参数从上游函数签名反射生成。</li>
           <li>再建立 <code>CapabilityDescriptor</code>、<code>BackendProvider</code> 与 <code>CapabilityHandler</code> 骨架。</li>
-          <li>首批只落一组共享能力，例如 <code>equity.price.history</code>、<code>equity.profile</code>、<code>instrument.search</code>。</li>
+          <li>首批只落一组共享能力，例如 <code>stock.price.history</code>、<code>stock.profile</code>、<code>instrument.search</code>。</li>
           <li>先接 <code>efinance</code> provider，证明新骨架可跑。</li>
           <li>再接 <code>akshare</code> 同能力 handler，并补 contract test。</li>
           <li>再改造 enrichment / observation，让它们从“看 provider”切换为“看 contract”。</li>
