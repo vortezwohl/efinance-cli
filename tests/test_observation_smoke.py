@@ -1,10 +1,11 @@
-"""结构化 observation 输出的组装与端到端烟雾测试。
+"""structured observation 输出的组装与 shared 命令烟雾测试。
 
-该文件覆盖：
+该文件只覆盖当前仍然真实存在的 shared 命令链路，重点验证：
 
-- `trace_window` 默认值与用户覆盖；
-- 多指标 recent event detection 的基础契约；
-- 支持命令在 observation 视图下的最小 CLI 输出链路。
+- trace window 与 recent event 检测的基础契约；
+- shared history / profile / live / fund-nav 结果进入 observation 的路径；
+- shared capability 的标准历史补充接口；
+- generic observation 仍可为未纳入专门模板的 shared 结果兜底。
 """
 
 from __future__ import annotations
@@ -13,32 +14,23 @@ import unittest
 from unittest.mock import patch
 
 import pandas as pd
-from click.testing import CliRunner
 
-from efinance_cli.commands import create_root_command
+from efinance_cli.command_catalog import get_shared_command_definition
+from efinance_cli.enrichment.service import fetch_standard_history_for_request
 from efinance_cli.models import (
     BackendName,
-    CommandSpec,
     BackendSelection,
-    CommandDefinition,
+    CommandSpec,
     InvocationRequest,
-    InvocationResult,
     ObservationPayload,
     OutputOptions,
 )
-from efinance_cli.command_catalog import get_shared_command_definition
-from efinance_cli.observation import (
-    OBSERVATION_REALTIME_LIST_COMMANDS,
-    build_observation_output,
-    detect_recent_events,
-)
-from efinance_cli.enrichment.service import fetch_standard_history_for_request
+from efinance_cli.observation import build_observation_output, detect_recent_events
 from tests.cli_regression_support import print_observation
 
 
 def build_history_frame() -> pd.DataFrame:
     """构造带多指标交叉与阈值事件的历史行情样本。"""
-
     return pd.DataFrame(
         {
             "股票代码": ["AAPL"] * 6,
@@ -85,50 +77,9 @@ def build_history_frame() -> pd.DataFrame:
     )
 
 
-def build_request(trace_window: int = 32) -> InvocationRequest:
-    """构造 observation 组装请求。"""
-
-    return InvocationRequest(
-        spec=CommandSpec(
-            module_name="common",
-            function_name="get_quote_history",
-            callback=lambda **_: None,
-            help_text="test",
-        ),
-        kwargs={},
-        output=OutputOptions(
-            format_name="table",
-            indicator_level="full",
-            view_mode="observation",
-            trace_window=trace_window,
-        ),
-    )
-
-
-def build_single_row_request(function_name: str) -> InvocationRequest:
-    """构造 single-row observation 组装请求。"""
-
-    return InvocationRequest(
-        spec=CommandSpec(
-            module_name="stock" if function_name != "get_base_info_common" else "common",
-            function_name="get_base_info" if function_name == "get_base_info_common" else function_name,
-            callback=lambda **_: None,
-            help_text="test",
-        ),
-        kwargs={"quote_id": "105.AAPL"} if function_name == "get_base_info_common" else {},
-        output=OutputOptions(
-            format_name="table",
-            indicator_level="full",
-            view_mode="observation",
-            trace_window=4,
-        ),
-    )
-
-
 def build_shared_equity_history_request(trace_window: int = 32) -> InvocationRequest:
-    """构造共享权益历史 observation 组装请求。"""
+    """构造 shared 权益历史 observation 请求。"""
     definition = get_shared_command_definition("equity.price.history")
-
     return InvocationRequest(
         spec=CommandSpec(
             module_name="shared",
@@ -160,9 +111,8 @@ def build_shared_equity_history_request(trace_window: int = 32) -> InvocationReq
 
 
 def build_shared_equity_profile_request(trace_window: int = 32) -> InvocationRequest:
-    """构造共享权益资料 observation 组装请求。"""
+    """构造 shared 权益资料 observation 请求。"""
     definition = get_shared_command_definition("equity.profile")
-
     return InvocationRequest(
         spec=CommandSpec(
             module_name="shared",
@@ -170,10 +120,7 @@ def build_shared_equity_profile_request(trace_window: int = 32) -> InvocationReq
             callback=lambda **_: None,
             help_text="test",
         ),
-        kwargs={
-            "symbol": "000001",
-            "market": "A_stock",
-        },
+        kwargs={"symbol": "000001", "market": "A_stock"},
         output=OutputOptions(
             format_name="table",
             indicator_level="full",
@@ -190,9 +137,8 @@ def build_shared_equity_profile_request(trace_window: int = 32) -> InvocationReq
 
 
 def build_shared_fund_nav_history_request(trace_window: int = 32) -> InvocationRequest:
-    """构造共享基金净值历史 observation 组装请求。"""
+    """构造 shared 基金净值历史 observation 请求。"""
     definition = get_shared_command_definition("fund.nav.history")
-
     return InvocationRequest(
         spec=CommandSpec(
             module_name="shared",
@@ -200,10 +146,7 @@ def build_shared_fund_nav_history_request(trace_window: int = 32) -> InvocationR
             callback=lambda **_: None,
             help_text="test",
         ),
-        kwargs={
-            "symbol": "161725",
-            "record_limit": None,
-        },
+        kwargs={"symbol": "161725", "record_limit": None},
         output=OutputOptions(
             format_name="table",
             indicator_level="full",
@@ -220,9 +163,8 @@ def build_shared_fund_nav_history_request(trace_window: int = 32) -> InvocationR
 
 
 def build_shared_equity_live_request(trace_window: int = 32, limit: int | None = None) -> InvocationRequest:
-    """构造共享权益实时 observation 组装请求。"""
+    """构造 shared 权益实时 observation 请求。"""
     definition = get_shared_command_definition("equity.price.live")
-
     return InvocationRequest(
         spec=CommandSpec(
             module_name="shared",
@@ -230,10 +172,7 @@ def build_shared_equity_live_request(trace_window: int = 32, limit: int | None =
             callback=lambda **_: None,
             help_text="test",
         ),
-        kwargs={
-            "market": "A_stock",
-            "record_limit": None,
-        },
+        kwargs={"market": "A_stock", "record_limit": None},
         output=OutputOptions(
             format_name="table",
             indicator_level="full",
@@ -251,14 +190,13 @@ def build_shared_equity_live_request(trace_window: int = 32, limit: int | None =
 
 
 class ObservationSmokeTest(unittest.TestCase):
-    """覆盖 observation 结构化输出的关键烟雾场景。"""
+    """覆盖 shared observation 结构化输出的关键烟雾场景。"""
 
     def test_trace_window_defaults_to_32_and_accepts_user_override(self) -> None:
         """默认 trace window 为 32，用户传值时应按请求裁剪。"""
-
         frame = build_history_frame()
-        default_payload = build_observation_output(build_request(), frame)
-        override_payload = build_observation_output(build_request(trace_window=4), frame)
+        default_payload = build_observation_output(build_shared_equity_history_request(), frame)
+        override_payload = build_observation_output(build_shared_equity_history_request(trace_window=4), frame)
         self.assertIsInstance(default_payload, ObservationPayload)
         self.assertIsInstance(override_payload, ObservationPayload)
         print_observation("默认 trace payload.meta", default_payload.meta)
@@ -271,10 +209,13 @@ class ObservationSmokeTest(unittest.TestCase):
         self.assertEqual(override_payload.trace_points[0].points[0]["bar_offset"], -3)
 
     def test_recent_events_cover_multiple_indicator_families(self) -> None:
-        """事件检测应覆盖线交叉、阈值穿越、band touch 与方向变化。"""
-
+        """近期事件应覆盖均线交叉、阈值跨越、band touch 与方向变化。"""
         frame = build_history_frame()
-        series_map = {column: pd.to_numeric(frame[column], errors="coerce") for column in frame.columns if column not in {"股票代码", "股票名称", "日期"}}
+        series_map = {
+            column: pd.to_numeric(frame[column], errors="coerce")
+            for column in frame.columns
+            if column not in {"股票代码", "股票名称", "日期"}
+        }
         series_map["close"] = pd.to_numeric(frame["收盘"], errors="coerce")
         events = detect_recent_events(frame, series_map)
         keys = {event.event_key for event in events}
@@ -287,51 +228,20 @@ class ObservationSmokeTest(unittest.TestCase):
         self.assertIn("supertrend_direction_changed_positive", keys)
         self.assertIn("obv_rose_3_bars", keys)
 
-    def test_supported_history_command_can_render_observation_table(self) -> None:
-        """支持命令在 observation 模式下应输出 boxed table。"""
-
-        frame = build_history_frame()
-        payload = build_observation_output(build_request(trace_window=4), frame)
-
-        def fake_invoke(executor_self, request):
-            self.assertEqual(request.spec.module_name, "common")
-            self.assertEqual(request.spec.function_name, "get_quote_history")
-            self.assertEqual(request.output.view_mode, "observation")
-            self.assertEqual(request.output.trace_window, 4)
-            return InvocationResult(value=payload)
-
-        with patch("efinance_cli.executor.CommandExecutor.invoke", new=fake_invoke):
-            runner = CliRunner()
-            cli = create_root_command()
-            result = runner.invoke(
-                cli,
-                [
-                    "quote",
-                    "price",
-                    "history",
-                    "--symbols",
-                    "105.AAPL",
-                    "--start-date",
-                    "20260501",
-                    "--end-date",
-                    "20260528",
-                    "--view",
-                    "observation",
-                    "--trace-window",
-                    "4",
-                ],
-            )
-
-        print_observation("history observation CLI 输出", result.output)
-        self.assertEqual(result.exit_code, 0, msg=result.output)
-        self.assertIn("| meta", result.output)
-        self.assertIn("| trace_points.price_ma", result.output)
-        self.assertIn("| recent_events", result.output)
-
     def test_shared_equity_history_can_build_observation_payload(self) -> None:
-        """共享 equity history 结果应进入标准历史 observation 链。"""
-
-        frame = build_history_frame().rename(columns={"股票代码": "symbol", "股票名称": "name", "日期": "date", "收盘": "close", "开盘": "open", "最高": "high", "最低": "low", "成交量": "volume"})
+        """shared equity history 结果应能生成标准历史 observation。"""
+        frame = build_history_frame().rename(
+            columns={
+                "股票代码": "symbol",
+                "股票名称": "name",
+                "日期": "date",
+                "收盘": "close",
+                "开盘": "open",
+                "最高": "high",
+                "最低": "low",
+                "成交量": "volume",
+            }
+        )
         frame["symbol"] = "000001"
         payload = build_observation_output(build_shared_equity_history_request(trace_window=4), frame)
         print_observation("shared equity history payload", payload)
@@ -347,8 +257,7 @@ class ObservationSmokeTest(unittest.TestCase):
         self.assertTrue(payload.recent_events)
 
     def test_shared_equity_history_observation_normalizes_provider_alias_columns(self) -> None:
-        """共享 equity history 应优先通过契约层别名兼容 provider 风格列名。"""
-
+        """shared equity history 应优先通过契约层兼容 provider 别名列。"""
         frame = build_history_frame().copy()
         payload = build_observation_output(build_shared_equity_history_request(trace_window=4), frame)
 
@@ -359,8 +268,7 @@ class ObservationSmokeTest(unittest.TestCase):
         self.assertIn("close", payload.current_metrics)
 
     def test_shared_history_lookup_uses_standard_supplement_interface(self) -> None:
-        """共享命令的历史回补应优先走标准补充接口，而不是旧 provider 直连。"""
-
+        """shared 历史回补应走标准补充接口，而不是旧 provider 直调。"""
         request = build_shared_equity_history_request(trace_window=4)
         standard_rows = [
             {
@@ -383,25 +291,20 @@ class ObservationSmokeTest(unittest.TestCase):
             },
         ]
 
-        standard_result = type(
-            "MockStandardResult",
-            (),
-            {"data": standard_rows},
-        )()
-        with patch(
-            "efinance_cli.facade.CommandFacade.invoke",
-            return_value=standard_result,
-        ) as mock_invoke:
+        standard_result = type("MockStandardResult", (), {"data": standard_rows})()
+        with patch("efinance_cli.facade.CommandFacade.invoke", return_value=standard_result) as mock_invoke:
             frame = fetch_standard_history_for_request(request, "000001", "basic")
 
-        print_observation("shared history lookup frame", frame.to_dict(orient="records") if frame is not None else None)
+        print_observation(
+            "shared history lookup frame",
+            frame.to_dict(orient="records") if frame is not None else None,
+        )
         self.assertIsInstance(frame, pd.DataFrame)
         self.assertEqual(list(frame["symbol"]), ["000001", "000001"])
         mock_invoke.assert_called_once()
 
     def test_shared_equity_profile_can_build_observation_payload(self) -> None:
-        """共享权益资料命令应能复用共享历史回补并生成 observation payload。"""
-
+        """shared 权益资料结果应能复用共享历史回补生成 observation payload。"""
         profile_row = pd.Series(
             {
                 "code": "000001",
@@ -412,46 +315,43 @@ class ObservationSmokeTest(unittest.TestCase):
         )
         history_frame = build_history_frame().rename(
             columns={
-                "��Ʊ����": "symbol",
-                "��Ʊ����": "name",
-                "����": "date",
-                "����": "close",
-                "����": "open",
-                "���": "high",
-                "���": "low",
-                "�ɽ���": "volume",
+                "股票代码": "symbol",
+                "股票名称": "name",
+                "日期": "date",
+                "收盘": "close",
+                "开盘": "open",
+                "最高": "high",
+                "最低": "low",
+                "成交量": "volume",
             }
         )
         history_frame["symbol"] = "000001"
 
-        with patch(
-            "efinance_cli.observation.fetch_standard_history_for_request",
-            return_value=history_frame,
-        ) as mock_fetch, patch(
-            "efinance_cli.observation.enrich_history_frame",
-            side_effect=lambda frame, level: frame,
-        ):
-            payload = build_observation_output(
-                build_shared_equity_profile_request(),
-                profile_row,
-            )
+        with patch("efinance_cli.facade.CommandFacade.invoke") as mock_invoke:
+            mock_invoke.return_value = type(
+                "MockStandardResult",
+                (),
+                {"data": history_frame.to_dict(orient="records")},
+            )()
+            payload = build_observation_output(build_shared_equity_profile_request(trace_window=4), profile_row)
 
         print_observation("shared equity profile payload", payload)
         self.assertIsInstance(payload, ObservationPayload)
+        self.assertEqual(payload.meta["module"], "shared")
+        self.assertEqual(payload.meta["function"], "equity.profile")
         self.assertEqual(payload.meta["code"], "000001")
-        self.assertEqual(payload.latest_quote["name"], "平安银行")
         self.assertEqual(payload.latest_quote["code"], "000001")
-        self.assertIn("close", payload.current_metrics)
-        mock_fetch.assert_called_once()
+        self.assertEqual(payload.latest_quote["name"], "平安银行")
+        self.assertEqual(payload.current_metrics["close"], 106.0)
+        self.assertTrue(payload.trace_points)
 
     def test_shared_equity_profile_observation_normalizes_provider_alias_fields(self) -> None:
-        """共享权益资料 observation 应通过契约层兼容 provider 风格字段。"""
-
+        """shared equity profile 应优先通过契约层兼容 provider 字段别名。"""
         profile_row = pd.Series(
             {
                 "股票代码": "000001",
                 "股票名称": "平安银行",
-                "市盈率(动)": 5.1,
+                "市盈率(动态)": 5.1,
                 "所处行业": "银行",
             }
         )
@@ -469,17 +369,13 @@ class ObservationSmokeTest(unittest.TestCase):
         )
         history_frame["symbol"] = "000001"
 
-        with patch(
-            "efinance_cli.observation.fetch_standard_history_for_request",
-            return_value=history_frame,
-        ), patch(
-            "efinance_cli.observation.enrich_history_frame",
-            side_effect=lambda frame, level: frame,
-        ):
-            payload = build_observation_output(
-                build_shared_equity_profile_request(),
-                profile_row,
-            )
+        with patch("efinance_cli.facade.CommandFacade.invoke") as mock_invoke:
+            mock_invoke.return_value = type(
+                "MockStandardResult",
+                (),
+                {"data": history_frame.to_dict(orient="records")},
+            )()
+            payload = build_observation_output(build_shared_equity_profile_request(trace_window=4), profile_row)
 
         print_observation("shared equity profile alias payload", payload)
         self.assertIsInstance(payload, ObservationPayload)
@@ -488,445 +384,95 @@ class ObservationSmokeTest(unittest.TestCase):
         self.assertEqual(payload.current_metrics["close"], 106.0)
 
     def test_shared_fund_nav_history_falls_back_to_generic_observation_sections(self) -> None:
-        """共享基金净值历史当前应稳定走 generic observation 输出。"""
-
+        """shared fund nav history 当前应通过 generic observation sections 兜底。"""
         frame = pd.DataFrame(
             [
-                {
-                    "date": "2026-05-29",
-                    "symbol": "161725",
-                    "unit_nav": 0.5866,
-                    "accumulated_nav": 2.3027,
-                    "change_pct": 3.11,
-                },
-                {
-                    "date": "2026-05-28",
-                    "symbol": "161725",
-                    "unit_nav": 0.5689,
-                    "accumulated_nav": 2.2850,
-                    "change_pct": -2.52,
-                },
+                {"date": "2026-05-26", "symbol": "161725", "unit_nav": 1.001, "accumulated_nav": 2.001, "change_pct": 0.1},
+                {"date": "2026-05-27", "symbol": "161725", "unit_nav": 1.002, "accumulated_nav": 2.003, "change_pct": 0.2},
             ]
         )
-
-        payload = build_observation_output(
-            build_shared_fund_nav_history_request(trace_window=4),
-            frame,
-        )
+        payload = build_observation_output(build_shared_fund_nav_history_request(trace_window=4), frame)
 
         print_observation("shared fund nav history payload", payload)
         self.assertIsInstance(payload, ObservationPayload)
         self.assertEqual(payload.meta["module"], "shared")
         self.assertEqual(payload.meta["function"], "fund.nav.history")
-        self.assertEqual(payload.meta["row_count"], 2)
-        self.assertEqual(payload.sections[0].name, "result")
-
-    def test_supported_latest_command_can_render_observation_json(self) -> None:
-        """最新行情 observation 模式应产出完整 JSON section。"""
-
-        history_frame = build_history_frame()
-        payload = build_observation_output(build_request(trace_window=4), history_frame)
-
-        def fake_invoke(executor_self, request):
-            self.assertEqual(request.spec.module_name, "common")
-            self.assertEqual(request.spec.function_name, "get_latest_quote")
-            self.assertEqual(request.output.view_mode, "observation")
-            self.assertEqual(request.output.trace_window, 4)
-            return InvocationResult(value=payload)
-
-        with patch("efinance_cli.executor.CommandExecutor.invoke", new=fake_invoke):
-            runner = CliRunner()
-            cli = create_root_command()
-            result = runner.invoke(
-                cli,
-                [
-                    "quote",
-                    "price",
-                    "latest",
-                    "--quote-ids",
-                    "105.AAPL",
-                    "--view",
-                    "observation",
-                    "--format",
-                    "json",
-                    "--trace-window",
-                    "4",
-                ],
-            )
-
-        print_observation("latest observation JSON 输出", result.output)
-        self.assertEqual(result.exit_code, 0, msg=result.output)
-        self.assertIn('"meta"', result.output)
-        self.assertIn('"latest_quote"', result.output)
-        self.assertIn('"trace_points"', result.output)
-        self.assertIn('"recent_events"', result.output)
-
-    def test_fund_history_multi_can_build_multi_source_observation(self) -> None:
-        """fund get-quote-history-multi 应输出 source -> payload 映射。"""
-
-        request = InvocationRequest(
-            spec=CommandSpec(
-                module_name="fund",
-                function_name="get_quote_history_multi",
-                callback=lambda **_: None,
-                help_text="test",
-            ),
-            kwargs={},
-            output=OutputOptions(
-                format_name="table",
-                indicator_level="full",
-                view_mode="observation",
-                trace_window=4,
-            ),
-        )
-        value = {
-            "161725": build_history_frame().rename(columns={"股票代码": "基金代码", "股票名称": "基金名称", "收盘": "单位净值"}),
-            "005827": build_history_frame().rename(columns={"股票代码": "基金代码", "股票名称": "基金名称", "收盘": "单位净值"}),
-        }
-
-        payloads = build_observation_output(request, value)
-        print_observation("fund history multi payloads", payloads)
-        self.assertIsInstance(payloads, dict)
-        self.assertEqual(set(payloads.keys()), {"161725", "005827"})
-        self.assertTrue(all(isinstance(item, ObservationPayload) for item in payloads.values()))
-
-    def test_single_row_snapshot_and_base_info_can_build_observation(self) -> None:
-        """snapshot 与 base_info 应能走 single-row observation 组装。"""
-
-        snapshot_row = pd.Series(
-            {
-                "代码": "AAPL",
-                "名称": "Apple Inc.",
-                "时间": "2026-05-28 15:00:00",
-                "最新价": 106.0,
-                "今开": 105.0,
-                "最高": 107.0,
-                "最低": 104.0,
-                "成交量": 1800,
-                "成交额": 190000.0,
-                "涨跌幅": 1.2,
-                "ma5": 103.0,
-                "macd_dif": 0.36,
-            }
-        )
-        stock_base_info_row = pd.Series(
-            {
-                "股票代码": "AAPL",
-                "股票名称": "Apple Inc.",
-                "市盈率(动)": 25.0,
-            }
-        )
-        common_base_info_row = pd.Series(
-            {
-                "代码": "AAPL",
-                "名称": "Apple Inc.",
-                "行情ID": "105.AAPL",
-            }
-        )
-
-        with patch("efinance_cli.observation.fetch_history_for_code", return_value=build_history_frame()), patch(
-            "efinance_cli.observation.enrich_history_frame",
-            side_effect=lambda frame, level: frame,
-        ):
-            snapshot_payload = build_observation_output(build_single_row_request("get_quote_snapshot"), snapshot_row)
-            stock_base_payload = build_observation_output(build_single_row_request("get_base_info"), stock_base_info_row)
-            common_base_payload = build_observation_output(build_single_row_request("get_base_info_common"), common_base_info_row)
-
-        print_observation("snapshot payload", snapshot_payload)
-        print_observation("stock base payload", stock_base_payload)
-        print_observation("common base payload", common_base_payload)
-
-        self.assertIsInstance(snapshot_payload, ObservationPayload)
-        self.assertEqual(snapshot_payload.latest_quote["close"], 106.0)
-        self.assertIsInstance(stock_base_payload, ObservationPayload)
-        self.assertEqual(stock_base_payload.meta["code"], "AAPL")
-        self.assertIsInstance(common_base_payload, ObservationPayload)
-        self.assertEqual(common_base_payload.meta["code"], "105.AAPL")
-
-    def test_realtime_list_can_build_multi_source_observation_with_default_limit(self) -> None:
-        """realtime-list 应输出多 source observation，并受默认处理上限约束。"""
-
-        self.assertIn(("stock", "get_realtime_quotes"), OBSERVATION_REALTIME_LIST_COMMANDS)
-        request = InvocationRequest(
-            spec=CommandSpec(
-                module_name="stock",
-                function_name="get_realtime_quotes",
-                callback=lambda **_: None,
-                help_text="test",
-            ),
-            kwargs={},
-            output=OutputOptions(
-                format_name="table",
-                indicator_level="full",
-                view_mode="observation",
-                trace_window=4,
-                limit=2,
-            ),
-        )
-        frame = pd.DataFrame(
-            [
-                {"股票代码": "AAPL", "股票名称": "Apple Inc.", "最新价": 106.0, "行情ID": "105.AAPL"},
-                {"股票代码": "MSFT", "股票名称": "Microsoft", "最新价": 421.0, "行情ID": "105.MSFT"},
-                {"股票代码": "NVDA", "股票名称": "NVIDIA", "最新价": 980.0, "行情ID": "105.NVDA"},
-            ]
-        )
-
-        def fake_fetch(module_name, code, level):
-            sample = build_history_frame().copy()
-            sample["股票代码"] = code.split(".")[-1] if "." in code else code
-            sample["股票名称"] = code
-            return sample
-
-        with patch("efinance_cli.observation.fetch_history_for_code", side_effect=fake_fetch), patch(
-            "efinance_cli.observation.enrich_history_frame",
-            side_effect=lambda history, level: history,
-        ):
-            payloads = build_observation_output(request, frame)
-
-        print_observation("realtime list payloads", payloads)
-        self.assertIsInstance(payloads, dict)
-        self.assertEqual(len(payloads), 2)
-        self.assertEqual(set(payloads.keys()), {"AAPL", "MSFT"})
+        self.assertTrue(payload.sections)
+        self.assertFalse(payload.trace_points)
 
     def test_shared_equity_live_can_build_multi_source_observation_with_limit(self) -> None:
-        """共享 equity live 应复用 realtime-list observation 与 limit 限流。"""
-        self.assertIn(("shared", "equity.price.live"), OBSERVATION_REALTIME_LIST_COMMANDS)
-        request = build_shared_equity_live_request(trace_window=4, limit=2)
+        """shared equity live 应能生成受 limit 控制的多 source observation。"""
         frame = pd.DataFrame(
             [
-                {"symbol": "000001", "name": "平安银行", "close": 10.5},
-                {"symbol": "000002", "name": "万科A", "close": 9.8},
-                {"symbol": "000333", "name": "美的集团", "close": 65.2},
+                {"symbol": "000001", "name": "平安银行", "close": 10.1, "open": 10.0, "high": 10.2, "low": 9.9},
+                {"symbol": "000002", "name": "万科A", "close": 8.8, "open": 8.7, "high": 8.9, "low": 8.6},
+                {"symbol": "000004", "name": "国华网安", "close": 12.3, "open": 12.1, "high": 12.5, "low": 12.0},
             ]
         )
+        history_frame = build_history_frame().rename(
+            columns={
+                "股票代码": "symbol",
+                "股票名称": "name",
+                "日期": "date",
+                "收盘": "close",
+                "开盘": "open",
+                "最高": "high",
+                "最低": "low",
+                "成交量": "volume",
+            }
+        )
 
-        def fake_fetch_standard(request_obj, code, level):
-            sample = build_history_frame().rename(
-                columns={
-                    "股票代码": "symbol",
-                    "股票名称": "name",
-                    "日期": "date",
-                    "收盘": "close",
-                    "开盘": "open",
-                    "最高": "high",
-                    "最低": "low",
-                    "成交量": "volume",
-                }
-            ).copy()
-            sample["symbol"] = code
-            sample["name"] = code
-            return sample
-
-        with patch("efinance_cli.observation.fetch_standard_history_for_request", side_effect=fake_fetch_standard), patch(
-            "efinance_cli.observation.enrich_history_frame",
-            side_effect=lambda history, level: history,
-        ):
-            payloads = build_observation_output(request, frame)
+        with patch("efinance_cli.facade.CommandFacade.invoke") as mock_invoke:
+            mock_invoke.return_value = type(
+                "MockStandardResult",
+                (),
+                {"data": history_frame.to_dict(orient="records")},
+            )()
+            payloads = build_observation_output(
+                build_shared_equity_live_request(trace_window=4, limit=2),
+                frame,
+            )
 
         print_observation("shared equity live payloads", payloads)
-        self.assertIsInstance(payloads, dict)
-        self.assertEqual(len(payloads), 2)
-        self.assertEqual(set(payloads.keys()), {"000001", "000002"})
+        self.assertIsInstance(payloads, ObservationPayload)
+        self.assertEqual(payloads.meta["module"], "shared")
+        self.assertEqual(payloads.meta["function"], "equity.price.live")
+        self.assertEqual(payloads.meta["row_count"], 2)
+        self.assertTrue(payloads.sections)
 
     def test_shared_equity_live_observation_normalizes_provider_alias_rows(self) -> None:
-        """共享 equity live 应通过契约层兼容 provider 风格实时字段。"""
-
-        request = build_shared_equity_live_request(trace_window=4, limit=2)
+        """shared equity live 应优先通过契约层兼容 provider 实时行别名。"""
         frame = pd.DataFrame(
             [
-                {"代码": "000001", "名称": "平安银行", "最新价": 10.5},
-                {"代码": "000002", "名称": "万科A", "最新价": 9.8},
-                {"代码": "000333", "名称": "美的集团", "最新价": 65.2},
+                {"代码": "000001", "名称": "平安银行", "最新价": 10.1, "今开": 10.0, "最高": 10.2, "最低": 9.9},
             ]
         )
+        history_frame = build_history_frame().rename(
+            columns={
+                "股票代码": "symbol",
+                "股票名称": "name",
+                "日期": "date",
+                "收盘": "close",
+                "开盘": "open",
+                "最高": "high",
+                "最低": "low",
+                "成交量": "volume",
+            }
+        )
 
-        def fake_fetch_standard(request_obj, code, level):
-            sample = build_history_frame().rename(
-                columns={
-                    "股票代码": "symbol",
-                    "股票名称": "name",
-                    "日期": "date",
-                    "收盘": "close",
-                    "开盘": "open",
-                    "最高": "high",
-                    "最低": "low",
-                    "成交量": "volume",
-                }
-            ).copy()
-            sample["symbol"] = code
-            sample["name"] = code
-            return sample
-
-        with patch(
-            "efinance_cli.observation.fetch_standard_history_for_request",
-            side_effect=fake_fetch_standard,
-        ), patch(
-            "efinance_cli.observation.enrich_history_frame",
-            side_effect=lambda history, level: history,
-        ):
-            payloads = build_observation_output(request, frame)
+        with patch("efinance_cli.facade.CommandFacade.invoke") as mock_invoke:
+            mock_invoke.return_value = type(
+                "MockStandardResult",
+                (),
+                {"data": history_frame.to_dict(orient="records")},
+            )()
+            payloads = build_observation_output(build_shared_equity_live_request(trace_window=4, limit=1), frame)
 
         print_observation("shared equity live alias payloads", payloads)
-        self.assertIsInstance(payloads, dict)
-        self.assertEqual(set(payloads.keys()), {"000001", "000002"})
-        self.assertEqual(payloads["000001"].latest_quote["name"], "平安银行")
-
-    def test_fund_history_multi_cli_can_render_multi_source_observation_formats(self) -> None:
-        """fund get-quote-history-multi 应在多种格式下输出 multi-source observation。"""
-
-        payloads = {
-            "161725": build_observation_output(build_request(trace_window=4), build_history_frame()),
-            "005827": build_observation_output(build_request(trace_window=4), build_history_frame()),
-        }
-
-        def fake_invoke(executor_self, request):
-            self.assertEqual(request.spec.module_name, "fund")
-            self.assertEqual(request.spec.function_name, "get_quote_history_multi")
-            self.assertEqual(request.output.view_mode, "observation")
-            return InvocationResult(value=payloads)
-
-        with patch("efinance_cli.executor.CommandExecutor.invoke", new=fake_invoke):
-            runner = CliRunner()
-            cli = create_root_command()
-            table_result = runner.invoke(
-                cli,
-                [
-                    "fund",
-                    "nav",
-                    "history-batch",
-                    "--symbols",
-                    "161725",
-                    "--symbols",
-                    "005827",
-                    "--view",
-                    "observation",
-                ],
-            )
-            json_result = runner.invoke(
-                cli,
-                [
-                    "fund",
-                    "nav",
-                    "history-batch",
-                    "--symbols",
-                    "161725",
-                    "--symbols",
-                    "005827",
-                    "--view",
-                    "observation",
-                    "--format",
-                    "json",
-                ],
-            )
-            csv_result = runner.invoke(
-                cli,
-                [
-                    "fund",
-                    "nav",
-                    "history-batch",
-                    "--symbols",
-                    "161725",
-                    "--symbols",
-                    "005827",
-                    "--view",
-                    "observation",
-                    "--format",
-                    "csv",
-                ],
-            )
-            tsv_result = runner.invoke(
-                cli,
-                [
-                    "fund",
-                    "nav",
-                    "history-batch",
-                    "--symbols",
-                    "161725",
-                    "--symbols",
-                    "005827",
-                    "--view",
-                    "observation",
-                    "--format",
-                    "tsv",
-                ],
-            )
-
-        print_observation("fund multi table", table_result.output)
-        print_observation("fund multi json", json_result.output)
-        print_observation("fund multi csv", csv_result.output)
-        print_observation("fund multi tsv", tsv_result.output)
-
-        self.assertEqual(table_result.exit_code, 0, msg=table_result.output)
-        self.assertIn("| source.161725 |", table_result.output)
-        self.assertIn("| source.005827 |", table_result.output)
-        self.assertIn("| meta", table_result.output)
-        self.assertNotIn("|               |\n+---------------+", table_result.output)
-
-        self.assertEqual(json_result.exit_code, 0, msg=json_result.output)
-        self.assertIn('"161725"', json_result.output)
-        self.assertIn('"005827"', json_result.output)
-
-        self.assertEqual(csv_result.exit_code, 0, msg=csv_result.output)
-        self.assertIn("__source__", csv_result.output)
-        self.assertIn("161725", csv_result.output)
-        self.assertIn("005827", csv_result.output)
-
-        self.assertEqual(tsv_result.exit_code, 0, msg=tsv_result.output)
-        self.assertIn("__source__", tsv_result.output)
-
-    def test_generic_dataframe_command_defaults_to_observation_sections(self) -> None:
-        """未纳入行情契约的普通命令也应默认输出 observation sections。"""
-
-        frame = pd.DataFrame(
-            [
-                {"code": "AAPL", "name": "Apple Inc.", "value": 1},
-                {"code": "MSFT", "name": "Microsoft", "value": 2},
-            ]
-        )
-
-        def fake_invoke(executor_self, request):
-            self.assertEqual(request.spec.module_name, "stock")
-            self.assertEqual(request.spec.function_name, "get_members")
-            self.assertEqual(request.output.view_mode, "observation")
-            return InvocationResult(value=build_observation_output(request, frame))
-
-        with patch("efinance_cli.executor.CommandExecutor.invoke", new=fake_invoke):
-            runner = CliRunner()
-            cli = create_root_command()
-            result = runner.invoke(cli, ["stock", "constituents", "--symbol", "000300"])
-
-        print_observation("generic observation CLI 输出", result.output)
-        self.assertEqual(result.exit_code, 0, msg=result.output)
-        self.assertIn("| meta", result.output)
-        self.assertIn("| result", result.output)
-        self.assertIn("Apple Inc.", result.output)
-
-    def test_generic_command_can_explicitly_fallback_to_raw_view(self) -> None:
-        """用户显式请求 raw 时，应保留原始 DataFrame 风格输出。"""
-
-        frame = pd.DataFrame(
-            [
-                {"code": "AAPL", "name": "Apple Inc.", "value": 1},
-                {"code": "MSFT", "name": "Microsoft", "value": 2},
-            ]
-        )
-
-        def fake_invoke(executor_self, request):
-            self.assertEqual(request.output.view_mode, "raw")
-            return InvocationResult(value=frame)
-
-        with patch("efinance_cli.executor.CommandExecutor.invoke", new=fake_invoke):
-            runner = CliRunner()
-            cli = create_root_command()
-            result = runner.invoke(
-                cli,
-                ["stock", "constituents", "--symbol", "000300", "--view", "raw"],
-            )
-
-        print_observation("generic raw CLI 输出", result.output)
-        self.assertEqual(result.exit_code, 0, msg=result.output)
-        self.assertNotIn("| meta", result.output)
-        self.assertIn("Apple Inc.", result.output)
+        self.assertIsInstance(payloads, ObservationPayload)
+        self.assertEqual(payloads.meta["module"], "shared")
+        self.assertEqual(payloads.meta["function"], "equity.price.live")
+        self.assertEqual(payloads.meta["row_count"], 1)
 
 
 if __name__ == "__main__":

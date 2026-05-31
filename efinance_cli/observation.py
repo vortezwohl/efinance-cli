@@ -155,6 +155,7 @@ OBSERVATION_MULTI_HISTORY_COMMANDS: set[tuple[str, str]] = {
 }
 
 OBSERVATION_SINGLE_ROW_COMMANDS: set[tuple[str, str]] = set(SINGLE_ROW_COMMANDS)
+OBSERVATION_SINGLE_ROW_COMMANDS.add(("shared", "equity.profile"))
 
 OBSERVATION_REALTIME_LIST_COMMANDS: set[tuple[str, str]] = {
     ("stock", "get_realtime_quotes"),
@@ -331,7 +332,7 @@ def build_realtime_list_observation_output(request: Any, value: Any) -> Any:
 
     limited = limit_realtime_observation_frame(request, value)
     result = build_mapping_payloads_from_rows(request, limited, builder=build_payload_from_single_row)
-    return result if result else value
+    return result if result else build_generic_observation_output(request, limited)
 
 
 def build_payload_from_history_frame(request: Any, frame: pd.DataFrame) -> ObservationPayload:

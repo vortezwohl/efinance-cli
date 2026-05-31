@@ -10,6 +10,7 @@ dependencies = [
     "efinance>=0.5.8",
     "pandas",
     "vortezwohl>=0.1.3",
+    "yfinance>=1.4.1",
 ]
 
 [project.scripts]

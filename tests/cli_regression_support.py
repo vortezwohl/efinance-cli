@@ -1,8 +1,8 @@
 """CLI 回归测试的共享辅助工具。
 
 该文件集中处理命令树枚举、样例参数构造和测试统计，避免各个测试文件重复维护同一份
-命令目录理解逻辑。由于本项目的命令面是动态生成的，测试也应尽量基于真实命令树自动
-发现，而不是手写一份容易漂移的静态清单。
+命令目录理解逻辑。当前命令面已经收敛为 shared 命令与 provider-extension 命令，
+因此这里的样例构造也只围绕这套稳定命令树展开。
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from collections import namedtuple
 from dataclasses import dataclass
 from pathlib import Path
 from pprint import pformat
+import sys
 from typing import Iterator
 
 import click
@@ -103,7 +104,7 @@ def build_required_tokens(
     """为一条命令构造最小必填参数。"""
     excluded = exclude_option_names or set()
     if leaf.path == ("watch",):
-        return ["watch", "quote", "price", "latest", "--quote-ids", "105.AAPL"]
+        return ["watch", "search", "--query", "AAPL"]
 
     tokens: list[str] = list(leaf.path)
     for parameter in leaf.command.params:
@@ -250,8 +251,11 @@ def _coerce_expected_value(parameter: click.Option, raw_value: str) -> object:
 
 def print_observation(title: str, value: object) -> None:
     """打印测试过程中的实际输出，便于人工查看。"""
-    print(f"\n===== {title} =====")
+    safe_title = str(title).encode("ascii", errors="backslashreplace").decode("ascii")
+    sys.stdout.write(f"\n===== {safe_title} =====\n")
     if isinstance(value, str):
-        print(value if value else "<empty>")
+        safe_value = value.encode("ascii", errors="backslashreplace").decode("ascii")
+        sys.stdout.write(f"{safe_value if safe_value else '<empty>'}\n")
         return
-    print(pformat(value, sort_dicts=False))
+    safe_repr = pformat(value, sort_dicts=False).encode("ascii", errors="backslashreplace").decode("ascii")
+    sys.stdout.write(f"{safe_repr}\n")

@@ -206,18 +206,20 @@ def fetch_standard_history_for_request(
     - 如果请求本身已经是共享历史命令，则优先复用该请求的后端与参数语义。
     """
 
-    command_key = (
-        request.command_definition.command_key
-        if request.command_definition is not None
-        else None
-    )
-    if command_key not in {"equity.price.history", "equity.profile"} or request.backend_selection is None:
+    command_key = request.command_definition.command_key if request.command_definition is not None else None
+    if command_key not in {"equity.price.history", "equity.profile", "equity.price.live"} or request.backend_selection is None:
         return fetch_history_for_code(request.spec.module_name, code, level)
 
     from efinance_cli.facade import CommandFacade
+    from efinance_cli.command_catalog import get_shared_command_definition
 
     config = LEVELS[level]
     facade = CommandFacade()
+    history_definition = (
+        request.command_definition
+        if command_key == "equity.price.history"
+        else get_shared_command_definition("equity.price.history")
+    )
     request_data = {
         "symbol": code,
         "market": request.kwargs.get("market"),
@@ -228,7 +230,7 @@ def fetch_standard_history_for_request(
     }
     try:
         standard_result = facade.invoke(
-            request.command_definition,
+            history_definition,
             request.backend_selection,
             request_data,
         )

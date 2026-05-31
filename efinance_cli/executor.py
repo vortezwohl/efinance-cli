@@ -1,13 +1,12 @@
 """命令执行与循环刷新管线。
 
-该模块负责把一次 CLI 调用稳定地串成固定流程：参数标准化、第三方函数调用、
-结果增强、渲染与输出。`watch` 只是对同一执行骨架做重复调度，不应把刷新逻辑
-侵入到各个业务命令内部。
+该模块只服务于 shared / provider-extension 命令路径。
+一次 CLI 调用会稳定串成：请求校验、backend 路由、handler 调用、结果物化、
+增强、observation、渲染与输出。`watch` 只是对同一执行骨架做重复调度。
 """
 
 from __future__ import annotations
 
-import inspect
 import time
 from pathlib import Path
 from typing import Any
@@ -17,7 +16,6 @@ import pandas as pd
 
 from efinance_cli.facade import CommandFacade
 from efinance_cli.enrichment import enrich_market_data
-from efinance_cli.introspection import build_parameter_specs, coerce_parameter_value
 from efinance_cli.models import InvocationRequest, InvocationResult
 from efinance_cli.observation import build_observation_output
 from efinance_cli.request_schema import validate_request_data
@@ -29,10 +27,9 @@ class CommandExecutor:
 
     def invoke(self, request: InvocationRequest) -> InvocationResult:
         """执行一次命令请求。"""
-        if request.command_definition is not None and request.backend_selection is not None:
-            value = self._execute_shared_command(request)
-        else:
-            value = self._execute_legacy_command(request)
+        if request.command_definition is None or request.backend_selection is None:
+            raise click.ClickException("Legacy function-driven commands are no longer supported.")
+        value = self._execute_shared_command(request)
         value = enrich_market_data(request, value)
         value = build_observation_output(request, value)
         return InvocationResult(value=value)
@@ -82,12 +79,6 @@ class CommandExecutor:
         """渲染结果文本。"""
         return render_value(result.value, request.output)
 
-    def _execute_legacy_command(self, request: InvocationRequest) -> Any:
-        """执行旧的函数驱动命令路径。"""
-
-        kwargs = self._normalize_kwargs(request)
-        return request.spec.callback(**kwargs)
-
     def _execute_shared_command(self, request: InvocationRequest) -> Any:
         """执行基于共享命令目录的新调用路径。"""
 
@@ -109,20 +100,6 @@ class CommandExecutor:
             **request_data,
         }
         return self._materialize_standard_result(request, standard_result)
-
-    def _normalize_kwargs(self, request: InvocationRequest) -> dict[str, Any]:
-        """按函数签名把 CLI 输入转换为真实调用参数。"""
-        specs = {spec.name: spec for spec in build_parameter_specs(request.spec.callback)}
-        normalized: dict[str, Any] = {}
-        for key, value in request.kwargs.items():
-            spec = specs.get(key)
-            if spec is None:
-                normalized[key] = value
-                continue
-            if isinstance(value, tuple) and not spec.is_variadic:
-                value = value[0] if len(value) == 1 else list(value)
-            normalized[key] = coerce_parameter_value(spec.annotation, value)
-        return normalized
 
     def _materialize_standard_result(self, request: InvocationRequest, standard_result: Any) -> Any:
         """把标准结果封装转换为现有渲染链可消费的对象。
@@ -161,17 +138,6 @@ class CommandExecutor:
 
         _ = request
         return pd.DataFrame(rows)
-
-
-def build_request_kwargs(function: Any, raw_kwargs: dict[str, Any]) -> dict[str, Any]:
-    """从 Click 参数中提取真实业务参数。"""
-    signature = inspect.signature(function)
-    valid_names = set(signature.parameters.keys())
-    result: dict[str, Any] = {}
-    for key, value in raw_kwargs.items():
-        if key in valid_names:
-            result[key] = value
-    return result
 
 
 def split_runtime_options(raw_kwargs: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:

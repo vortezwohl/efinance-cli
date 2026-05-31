@@ -1,19 +1,13 @@
 """Click 命令构建层。
 
-该模块负责把注册中心中的命令描述动态转换为自然化语义命令树，并统一附加输出、
-观察视图与刷新控制参数。当前版本同时承载两套路径：
-
-- 旧的 `efinance` 函数驱动命令树；
-- 新的共享命令目录驱动命令树。
-
-这样做是为了先把多后端骨架接入，再逐步把代表性命令迁移到新的 capability 架构。
+该模块只负责挂载 shared 命令目录与 provider 扩展命令目录。
+旧的函数驱动命令树已经被下线，命令面不再从第三方函数签名动态反射生成。
 """
 
 from __future__ import annotations
 from typing import Any
 
 import click
-import pandas as pd
 
 from efinance_cli.backends.resolver import resolve_backend_selection
 from efinance_cli.backends.factory import list_provider_extension_commands
@@ -24,27 +18,18 @@ from efinance_cli.command_catalog import (
 )
 from efinance_cli.executor import (
     CommandExecutor,
-    build_request_kwargs,
     default_watch_count,
     split_runtime_options,
 )
-from efinance_cli.introspection import apply_click_parameters, build_parameter_specs
 from efinance_cli.models import (
     BackendName,
-    CommandSpec,
     CommandDefinition,
     InvocationRequest,
+    CommandSpec,
     OutputOptions,
     WatchOptions,
 )
 from efinance_cli.request_schema import build_click_options_for_schema
-from efinance_cli.registry import (
-    GROUP_HELP_TEXT,
-    build_command_specs_for_group,
-    get_command_spec,
-    list_root_group_names,
-)
-from efinance_cli.retry_utils import call_with_network_retry
 
 
 def create_root_command() -> click.Group:
@@ -58,37 +43,12 @@ def create_root_command() -> click.Group:
     cli.add_command(create_search_group())
     cli.add_command(create_watch_command())
 
-    for group_name in list_root_group_names():
-        if group_name == "search":
-            continue
-        cli.add_command(create_root_group(group_name))
-
     for group_name in list_shared_root_groups():
-        existing = cli.commands.get(group_name)
-        if existing is not None:
-            if not isinstance(existing, click.Group):
-                raise ValueError(f"Root path conflict at {group_name}")
-            for definition in build_shared_command_definitions_for_group(group_name):
-                attach_definition_to_tree(existing, definition)
-            continue
         cli.add_command(create_shared_root_group(group_name))
 
     for backend_name, definitions in list_provider_extension_commands().items():
         cli.add_command(create_provider_extension_root_group(backend_name.value, definitions))
     return cli
-
-
-def create_root_group(group_name: str) -> click.Group:
-    """根据自然化分组名称创建根命令组。"""
-
-    @click.group(name=group_name)
-    def group() -> None:
-        """自然化语义分组。"""
-
-    group.help = GROUP_HELP_TEXT[group_name]
-    for spec in build_command_specs_for_group(group_name):
-        attach_spec_to_tree(group, spec)
-    return group
 
 
 def create_shared_root_group(group_name: str) -> click.Group:
@@ -119,25 +79,6 @@ def create_provider_extension_root_group(
         attach_definition_to_tree(group, definition)
     return group
 
-
-def attach_spec_to_tree(root_group: click.Group, spec: CommandSpec) -> None:
-    """把命令规格按 cli_path 递归挂载到命令树。"""
-    path_parts = spec.cli_path[1:]
-    if not path_parts:
-        raise ValueError(f"Invalid cli_path for command: {spec.cli_path}")
-
-    current_group = root_group
-    for part in path_parts[:-1]:
-        child = current_group.commands.get(part)
-        if child is None:
-            child = click.Group(name=part)
-            current_group.add_command(child)
-        elif not isinstance(child, click.Group):
-            raise ValueError(f"Path conflict at {' '.join(spec.cli_path)}")
-        current_group = child
-    current_group.add_command(create_function_command(spec, command_name=path_parts[-1]))
-
-
 def attach_definition_to_tree(root_group: click.Group, definition: CommandDefinition) -> None:
     """把共享命令定义递归挂载到命令树。"""
 
@@ -155,50 +96,6 @@ def attach_definition_to_tree(root_group: click.Group, definition: CommandDefini
             raise ValueError(f"Path conflict at {' '.join(definition.cli_path)}")
         current_group = child
     current_group.add_command(create_shared_command(definition, command_name=path_parts[-1]))
-
-
-def create_function_command(spec: CommandSpec, command_name: str | None = None) -> click.Command:
-    """为单个 efinance 函数创建 Click 命令。"""
-
-    def callback(**kwargs: Any) -> None:
-        business_kwargs, runtime_kwargs = split_runtime_options(kwargs)
-        executor = CommandExecutor()
-        request = InvocationRequest(
-            spec=spec,
-            kwargs=build_request_kwargs(spec.callback, business_kwargs),
-            output=OutputOptions(
-                format_name=runtime_kwargs["format_name"],
-                full=runtime_kwargs["full"],
-                transpose=runtime_kwargs["transpose"],
-                no_index=runtime_kwargs["no_index"],
-                limit=runtime_kwargs["limit"],
-                output_path=runtime_kwargs["output_path"],
-                encoding=runtime_kwargs["encoding"],
-                indicator_level=runtime_kwargs["indicator_level"],
-                view_mode=runtime_kwargs["view_mode"],
-                trace_window=runtime_kwargs["trace_window"],
-            ),
-            watch=WatchOptions(
-                enabled=runtime_kwargs["watch"],
-                interval=runtime_kwargs["interval"],
-                count=default_watch_count(runtime_kwargs["watch"], runtime_kwargs["count"]),
-                clear_screen=runtime_kwargs["clear_screen"],
-            ),
-        )
-        executor.run(request)
-
-    command = click.Command(
-        name=command_name or spec.command_name,
-        callback=callback,
-        help=build_help_text(spec),
-        context_settings={"ignore_unknown_options": False},
-    )
-    command = apply_click_parameters(
-        command,
-        build_parameter_specs(spec.callback, command_key=(spec.module_name, spec.function_name)),
-    )
-    attach_runtime_options(command)
-    return command
 
 
 def create_shared_command(
@@ -334,18 +231,6 @@ def attach_runtime_options(command: click.Command, include_backend: bool = False
         ),
     ])
     command.params.extend(params)
-
-
-def build_help_text(spec: CommandSpec) -> str:
-    """生成命令帮助文本。"""
-    lines = [spec.help_text]
-    lines.append("")
-    lines.append(f"对应函数: efinance.{spec.module_name}.{spec.function_name}")
-    if spec.has_side_effect:
-        lines.append("注意: 该命令具有副作用，执行后可能下载文件或修改运行时状态。")
-    return "\n".join(lines)
-
-
 def build_shared_help_text(definition: CommandDefinition) -> str:
     """生成共享命令帮助文本。"""
 
@@ -362,7 +247,7 @@ def build_shared_help_text(definition: CommandDefinition) -> str:
 
 
 def create_search_group() -> click.Group:
-    """创建顶层 search 分组，包含默认搜索与本地搜索。"""
+    """创建顶层 search 分组，仅保留 shared 默认搜索。"""
 
     @click.group(name="search", invoke_without_command=True)
     @click.pass_context
@@ -382,12 +267,6 @@ def create_search_group() -> click.Group:
         if isinstance(parameter, click.Option) and parameter.name == "query":
             parameter.required = False
     search_group.help = "根据关键字搜索证券候选项。"
-
-    local_search = create_function_command(
-        get_command_spec("utils", "search_quote_locally"),
-        command_name="local",
-    )
-    search_group.add_command(local_search)
     return search_group
 
 
